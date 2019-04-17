@@ -1,3 +1,2 @@
-#Lei Shu
 ###Publication
 
