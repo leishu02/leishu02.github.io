@@ -2016,7 +2016,7 @@ input, select, textarea {
 /* Section/Article */
 
 	section.special, article.special {
-		text-align: left; <!--Lei center-->
+		text-align: center;
 	}
 
 	header p {
