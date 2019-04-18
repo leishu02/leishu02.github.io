@@ -178,7 +178,7 @@ input, select, textarea {
 	}
 
 	h5 {
-		font-size: 0.9em;
+		font-size: 1.0em;
 		line-height: 1.5em;
 	}
 
@@ -3230,7 +3230,7 @@ input, select, textarea {
 		/* Header */
 
 			#header {
-				padding: 3em 0 3em 0 ;
+				padding: 2em 0 2em 0 ;
 			}
 
 	}
@@ -3264,7 +3264,7 @@ input, select, textarea {
 		/* Main */
 
 			.main {
-				padding: 4em 0 2em 0 ;
+				padding: 2em 0 2em 0 ;
 			}
 
 				.main.style2 {
@@ -3274,7 +3274,7 @@ input, select, textarea {
 		/* Header */
 
 			#header {
-				padding: 4em 0 4em 0 ;
+				padding: 2em 0 2em 0 ;
 				background-attachment: scroll;
 			}
 
@@ -3285,7 +3285,7 @@ input, select, textarea {
 		/* Footer */
 
 			#footer {
-				padding: 3em 0 3em 0 ;
+				padding: 2em 0 2em 0 ;
 				background-attachment: scroll;
 			}
 
@@ -3316,7 +3316,7 @@ input, select, textarea {
 		/* Header */
 
 			#header {
-				padding: 8em 3em 8em 3em ;
+				padding: 5em 3em 5em 3em ;
 			}
 
 		/* Footer */
