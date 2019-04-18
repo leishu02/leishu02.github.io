@@ -3327,13 +3327,13 @@ input, select, textarea {
 		/* One */
 
 			#one {
-				text-align: center;
+				text-align: left;
 			}
 
 		/* Two */
 
 			#two {
-				text-align: center;
+				text-align: left;
 			}
 
 	}
