@@ -99,8 +99,8 @@ input, select, textarea {
 
 	body, input, select, textarea {
 		color: #666;
-		font-family: "Source Sans Pro", Helvetica, sans-serif;
-		font-size: 16pt;
+		font-family: Arial, Helvetica, sans-serif;
+		font-size: 12pt;
 		font-weight: 300;
 		line-height: 1.65em;
 	}
@@ -120,17 +120,29 @@ input, select, textarea {
 			color: #6bd4c8;
 		}
 
-	strong, b {
+	b {
 		color: #555;
-		font-weight: 400;
+		font-weight: 800;
 	}
-
-	em, i {
+	strong {
+		color: #555;
+		font-weight: 500;
+		font-size: 13pt;
+	}
+	small {
+		color: #76D7C4;
+		font-size: 11pt;
+	}
+	i {
+		font-style: italic;
+	}
+	em{
+		font-weight: 500;
 		font-style: italic;
 	}
 
 	p {
-		margin: 0 0 2em 0;
+		margin: 0 0 1em 0;
 	}
 
 	h1, h2, h3, h4, h5, h6 {
@@ -2382,6 +2394,7 @@ input, select, textarea {
 	}
 
 		ol li {
+			padding: 0.5em 0;
 			padding-left: 0.25em;
 		}
 
@@ -3210,13 +3223,13 @@ input, select, textarea {
 		/* Basic */
 
 			body, input, select, textarea {
-				font-size: 16pt;
+				font-size: 13pt;
 			}
 
 		/* Header */
 
 			#header {
-				padding: 6em 0 6em 0 ;
+				padding: 3em 0 3em 0 ;
 			}
 
 	}
@@ -3260,7 +3273,7 @@ input, select, textarea {
 		/* Header */
 
 			#header {
-				padding: 5em 0 5em 0 ;
+				padding: 4em 0 4em 0 ;
 				background-attachment: scroll;
 			}
 
@@ -3271,7 +3284,7 @@ input, select, textarea {
 		/* Footer */
 
 			#footer {
-				padding: 4em 0 4em 0 ;
+				padding: 3em 0 3em 0 ;
 				background-attachment: scroll;
 			}
 
