@@ -2338,7 +2338,11 @@ input, select, textarea {
 			border-radius: 4px;
 			display: block;
 		}
-
+		.img-circle {
+			border-radius: 50%;
+  			width:120px;
+  			height:120px;
+		}
 		.image.left {
 			float: left;
 			padding: 0 1.5em 1em 0;
@@ -3206,7 +3210,7 @@ input, select, textarea {
 		/* Basic */
 
 			body, input, select, textarea {
-				font-size: 14pt;
+				font-size: 16pt;
 			}
 
 		/* Header */
