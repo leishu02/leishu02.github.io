@@ -2352,8 +2352,8 @@ input, select, textarea {
 		}
 		.img-circle {
 			border-radius: 50%;
-  			width:120px;
-  			height:120px;
+  			width:200px;
+  			height:200px;
 		}
 		.image.left {
 			float: left;
