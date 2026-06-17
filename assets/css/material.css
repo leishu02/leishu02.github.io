@@ -102,12 +102,16 @@ section { padding: 40px 0; }
 
 /* ---------- Hero ---------- */
 .hero {
+    position: relative;
+    overflow: hidden;
     text-align: center;
     padding: 56px 24px 40px;
-    background:
-        radial-gradient(1200px 300px at 50% -120px, #e8f0fe 0%, rgba(232,240,254,0) 70%),
-        var(--surface);
-    border-bottom: 1px solid var(--line);
+    background: url('../../images/bamboo-bg.webp') center/cover no-repeat;
+    border-bottom: 1px solid #d0dbd2;
+}
+.hero > * {
+    position: relative;
+    z-index: 1;
 }
 .hero img.avatar {
     width: 152px; height: 152px;
