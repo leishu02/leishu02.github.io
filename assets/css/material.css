@@ -59,6 +59,7 @@ a:hover { text-decoration: underline; }
     font-weight: 500;
     color: var(--text);
     letter-spacing: .2px;
+    white-space: nowrap;
 }
 .brand:hover { text-decoration: none; }
 .brand .dot-b { color: var(--g-blue); }
