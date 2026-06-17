@@ -1,80 +1,63 @@
 <!DOCTYPE HTML>
-<html>
+<html lang="en">
 <head>
-    <title>Lei Shu (舒蕾) - Homepage</title>
+    <title>Services and Awards - Lei Shu (舒蕾)</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-    <link rel="stylesheet" href="assets/css/main.css" />
-    <noscript><link rel="stylesheet" href="assets/css/noscript.css" /></noscript>
-    <style>
-        /* Navbar styles */
-        .navbar {
-            background-color: #2c3e50;
-            position: fixed;
-            top: 0;
-            width: 100%;
-            z-index: 1000;
-            display: flex;
-            justify-content: center; /* Center the content */
-            align-items: center;
-            padding: 0.5em 0;
-        }
-        .navbar a {
-            color: white;
-            text-align: center;
-            padding: 0.5em 1em;
-            text-decoration: none;
-            font-size: 1em;
-        }
-        .navbar a:hover {
-            background-color: #76D7C4;
-            color: white;
-        }
-        body {
-            padding-top: 60px; /* Add padding to prevent overlap with the navbar */
-        }
-    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="Lei Shu" />
+    <meta name="description" content="Professional services and awards of Lei Shu (舒蕾), Research Scientist at Google DeepMind." />
+    <link rel="icon" type="image/png" href="images/emoji.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="assets/css/material.css" />
 </head>
-<body class="is-preload">
+<body>
 
-    <!-- Navigation Bar -->
-    <div class="navbar">
-        <a href="index.html#header">Home</a>
-        <a href="index.html#welcome">About</a>
-        <a href="index.html#news">News</a>
-        <a href="index.html#publications">Publications</a>
-        <a href="#one">Services</a>
-    </div>
+    <header class="appbar">
+        <div class="appbar-inner">
+            <a class="brand" href="index.html#top">Lei Shu <span class="dot-b">舒</span><span class="dot-g">蕾</span></a>
+            <nav class="nav">
+                <a href="index.html#about">About</a>
+                <a href="index.html#research">Research</a>
+                <a href="index.html#news">News</a>
+                <a href="publications.html">Publications</a>
+                <a href="services.html" class="active">Services</a>
+            </nav>
+        </div>
+    </header>
 
-        <section id="one" class="main style2">
-            <div class="align-left">
-            <div class="container" >
-                    <h2 style="display:inline; color: #76D7C4">Professional Services</h2>	
-                    <ul style="list-style-type:circle; line-height:200%;">		
-                        <li><em><strong>Aera/Session Chair</strong></em> for ACLARR, ACL, EMNLP, NAACL, EACL, COLING, IJCAI</li>					
-                        <li><em><strong>PC member</strong></em> for NeurIPS, ICML, ICLR, AAAI, IJCAU, HLDS, WACV, INLG, SLT</li>
-                        
-                        <li><em><strong>Invited Reviewer</strong></em> of IEEE Transactions on Affective Computing, IEEE Access, IEEE/ACM Transactions on Audio, Speech, and Language Processing, Progress in Artificial Intelligence </li>
-                    </ul>
-
-                    <hr>
-                    <h2 style="display:inline; color: #76D7C4">Awards</h2>	
-                    <ul style="list-style-type:circle; line-height:200%;">							
-                        <li><strong><em>Grand Prize Winner</em></strong> of <a href="https://www.yelp.com/dataset/challenge/winners">Yelp Dataset Challenge Round 12</a> </li>
-                    </ul>
-            </div>	
+    <main>
+        <section>
+            <h2 class="section-title"><span class="bar"></span>Professional Services</h2>
+            <div class="card">
+                <ul class="rows">
+                    <li><span class="lead">Area / Session Chair</span> — ACL ARR, ACL, EMNLP, NAACL, EACL, COLING, IJCAI</li>
+                    <li><span class="lead">PC Member</span> — NeurIPS, ICML, ICLR, AAAI, IJCAI, HLDS, WACV, INLG, SLT</li>
+                    <li><span class="lead">Invited Reviewer</span> — IEEE Transactions on Affective Computing, IEEE Access, IEEE/ACM Transactions on Audio, Speech, and Language Processing, Progress in Artificial Intelligence</li>
+                </ul>
             </div>
         </section>
 
+        <section style="padding-top:0">
+            <h2 class="section-title"><span class="bar"></span>Awards</h2>
+            <div class="card">
+                <ul class="rows">
+                    <li><span class="lead">Grand Prize Winner</span> — <a href="https://www.yelp.com/dataset/challenge/winners">Yelp Dataset Challenge Round 12</a></li>
+                </ul>
+            </div>
+        </section>
+    </main>
 
-
-    <!-- Scripts -->
-        <script src="assets/js/jquery.min.js"></script>
-        <script src="assets/js/jquery.scrolly.min.js"></script>
-        <script src="assets/js/browser.min.js"></script>
-        <script src="assets/js/breakpoints.min.js"></script>
-        <script src="assets/js/util.js"></script>
-        <script src="assets/js/main.js"></script>
-
-	</body>
+    <footer>
+        <div class="footer-inner">
+            <span>&copy; Lei Shu</span>
+            <div class="social">
+                <a class="btn" href="https://scholar.google.com/citations?user=Q0zkC-kAAAAJ&hl=en">Scholar</a>
+                <a class="btn" href="https://www.linkedin.com/in/lei-shu-8b361642/">LinkedIn</a>
+                <a class="btn" href="mailto:leishu@google.com">Email</a>
+            </div>
+        </div>
+    </footer>
+</body>
 </html>
