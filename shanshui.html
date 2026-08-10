@@ -196,20 +196,18 @@ const water = new THREE.Mesh(
       #include <common>
       #include <fog_pars_vertex>
       uniform float uTime;
-      varying float vRipple;
-      varying vec3  vView;
-      varying vec3  vWorld;
+      varying vec3 vView;
+      varying vec3 vWorld;
       void main() {
+        // only the long, slow swell is real geometry — the fine grain of the
+        // surface is drawn per pixel, where it can never be under-sampled
         vec3 pos = position;
-        float r =
-            sin(pos.x * 0.38 + uTime * 0.85) * 0.055
-          + sin(pos.y * 0.27 - uTime * 0.62) * 0.048
-          + sin((pos.x + pos.y) * 0.15 + uTime * 0.40) * 0.070;
-        pos.z += r;
-        vRipple = r;
-        vWorld  = (modelMatrix * vec4(pos, 1.0)).xyz;
+        pos.z += sin(pos.x * 0.16 + uTime * 0.45) * 0.055
+               + sin(pos.y * 0.11 - uTime * 0.33) * 0.045;
+
+        vWorld = (modelMatrix * vec4(pos, 1.0)).xyz;
         vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        vView   = -mvPosition.xyz;
+        vView  = -mvPosition.xyz;
         gl_Position = projectionMatrix * mvPosition;
         #include <fog_vertex>
       }`,
@@ -218,20 +216,46 @@ const water = new THREE.Mesh(
       #include <fog_pars_fragment>
       uniform vec3 water, paper;
       uniform float uTime;
-      varying float vRipple;
-      varying vec3  vView;
-      varying vec3  vWorld;
+      varying vec3 vView;
+      varying vec3 vWorld;
+
+      // Ripple lines run ACROSS the current and only waver — a field built from
+      // crossed waves alone closes into blobs and reads as a contour map.
+      float ripple(vec2 p, float t) {
+        float r = p.y * 0.62;                                  // downstream ranks
+        r += sin(p.x * 0.15 + t * 0.30) * 1.05;                // slow meander
+        r += sin(p.x * 0.34 - t * 0.48) * 0.48;
+        r += sin(p.x * 0.71 + p.y * 0.09 - t * 0.72) * 0.22;
+        r += sin(p.y * 0.26 + t * 0.62) * 0.26;                // swell passing
+        r += sin(p.x * 1.55 - p.y * 0.18 + t * 1.05) * 0.085;  // fine chop
+        return r;
+      }
+
       void main() {
+        vec2 p = vWorld.xz;
+        float t = uTime;
+
         // grazing angles catch a little sky, but the river keeps its ink
         float fres = pow(1.0 - abs(normalize(vView).y), 2.6);
-        vec3 col = mix(water, paper, 0.10 + 0.44 * fres);
+        vec3 col = mix(water, paper, 0.12 + 0.42 * fres);
 
-        // horizontal strokes — water is drawn, not simulated, on a scroll
-        float band = sin(vWorld.z * 0.85 + sin(vWorld.x * 0.22) * 1.7 + uTime * 0.30);
-        col = mix(col, water * 0.62, smoothstep(0.80, 0.99, band) * 0.42);
+        float r = ripple(p, t);
 
-        // silver where the ripple crests
-        col = mix(col, vec3(1.0), smoothstep(0.050, 0.108, vRipple) * 0.34);
+        // fine contour strokes along the surface, antialiased by their own
+        // screen-space gradient so they never alias into moiré at distance
+        float v  = r * 1.15;
+        float g  = abs(fract(v) - 0.5);
+        float aa = fwidth(v);
+        float line = 1.0 - smoothstep(0.0, aa * 1.9, g);
+
+        // strokes thin out toward the horizon, as a brush would run dry
+        line *= smoothstep(0.0, 0.045, aa) * (1.0 - smoothstep(0.16, 0.55, aa));
+
+        col = mix(col, water * 0.58, line * 0.50);
+
+        // and a colder sheen just off each crest
+        float crest = smoothstep(0.55, 1.35, r);
+        col = mix(col, paper, crest * 0.22);
 
         gl_FragColor = vec4(col, 0.94);
         #include <fog_fragment>
@@ -330,7 +354,10 @@ const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 42949672
 
 function addStalk(x, z, h, r) {
   const ground = terrainHeight(x, z);
-  if (ground < 0.55) return;          // nothing grows mid-river
+  // bamboo grows on the bank, never in the stream — clear of both the
+  // waterline and the channel itself
+  if (ground < 1.1) return;
+  if (Math.abs(x - riverX(z)) < 9.5) return;
   stalks.push({
     x, z,
     base: ground - 0.4,
@@ -359,13 +386,13 @@ for (let c = 0; c < 30; c++) {
 
 /* Mass on the left bank, void on the right — the oldest composition there is.
    These are the only stalks close enough to actually fill the frame edge. */
-for (let i = 0; i < 22; i++) {
+for (let i = 0; i < 26; i++) {
   const z = 24 - rnd() * 20;
-  addStalk(riverX(z) - (6 + rnd() * 9), z, 13 + rnd() * 10, 0.20 + rnd() * 0.12);
+  addStalk(riverX(z) - (11 + rnd() * 10), z, 13 + rnd() * 10, 0.20 + rnd() * 0.12);
 }
-for (let i = 0; i < 20; i++) {
+for (let i = 0; i < 22; i++) {
   const z = 14 - rnd() * 24;
-  addStalk(riverX(z) + (10 + rnd() * 11), z, 15 + rnd() * 11, 0.18 + rnd() * 0.11);
+  addStalk(riverX(z) + (11 + rnd() * 11), z, 15 + rnd() * 11, 0.18 + rnd() * 0.11);
 }
 
 /* Pre-roll the foliage so it doesn't shimmer between frames.
@@ -374,14 +401,18 @@ for (let i = 0; i < 20; i++) {
 const branchPlan = [], leafPlan = [];
 for (let s = 0; s < stalks.length; s++) {
   const st = stalks[s];
-  // foliage detail follows the eye: near culms get full sprays, far ones a hint
-  const near = sstep(-130, 20, st.z);
+  // detail follows the eye: near culms get full sprays, far ones a bare hint
+  const near = Math.pow(sstep(-110, 22, st.z), 1.15);
 
   for (let seg = 0; seg < st.segs; seg++) {
     const f = (seg + 1) / st.segs;
-    if (f < 0.45) continue;                     // the crown sits high and airy
+    // far crowns start lower and use fewer, larger blades: same visual mass,
+    // a fraction of the geometry
+    if (f < 0.45 - (1 - near) * 0.14) continue;
 
-    const nb = 2 + Math.floor(rnd() * 2 + near * 2);
+    // fewer branches, denser sprays — scattered twigs read as a dead tree,
+    // clumped ones read as a bamboo crown
+    const nb = 1 + Math.floor(rnd() * 1.2 + near * 2);
     for (let b = 0; b < nb; b++) {
       const bi = branchPlan.length;
       const bLen = st.h * (0.06 + rnd() * 0.09);
@@ -394,9 +425,9 @@ for (let s = 0; s < stalks.length; s++) {
         ph:    rnd() * Math.PI * 2,
       });
 
-      const nl = 5 + Math.floor(rnd() * 2 + near * 4);
+      const nl = 7 + Math.floor(rnd() * 2 + near * 4);
       for (let l = 0; l < nl; l++) {
-        const len = bLen * (1.0 + rnd() * 0.85);
+        const len = bLen * (1.0 + rnd() * 0.85) * (1.0 + (1 - near) * 0.75);
         leafPlan.push({
           b: bi,
           // leaves spray ALONG the twig, not in a pom-pom at its tip
@@ -425,6 +456,7 @@ const push = (arr, mat, sx, sy, sz, speed, phase) =>
 for (const st of stalks) {
   const segH = st.h / st.segs;
   const dx = Math.cos(st.dir), dz = Math.sin(st.dir);
+  const showRings = sstep(-110, 22, st.z) > 0.42;   // node rings only up close
 
   for (let s = 0; s < st.segs; s++) {
     const f0 = s / st.segs, f1 = (s + 1) / st.segs;
@@ -443,7 +475,7 @@ for (const st of stalks) {
     S3.set(rad, segH * 1.02, rad);
     push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
 
-    if (s > 0) {
+    if (s > 0 && showRings) {
       S3.set(rad, st.r * 0.30, rad);
       push(ringD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
     }
@@ -574,7 +606,7 @@ addEventListener('resize', () => {
 });
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(0, 7, -70);
+const look = new THREE.Vector3(1.5, 7, -70);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -582,7 +614,8 @@ function frame() {
   ptr.x += (aim.x - ptr.x) * 0.035;
   ptr.y += (aim.y - ptr.y) * 0.035;
 
-  camera.position.x = ptr.x * 5.5 + Math.sin(t * 0.10) * 1.6;
+  // the eye stands on the left bank, under the bamboo, looking downstream
+  camera.position.x = -5.5 + ptr.x * 4.5 + Math.sin(t * 0.10) * 1.4;
   camera.position.y = 5.4 - ptr.y * 1.9 + Math.sin(t * 0.14) * 0.35;
   camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
   camera.lookAt(look);
