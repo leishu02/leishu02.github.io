@@ -43,6 +43,7 @@
 
     <!-- Hero -->
     <section class="hero" id="top">
+        <canvas class="hero-scene" id="hero-scene" aria-hidden="true"></canvas>
         <img class="avatar" src="images/IMG_0530_small.JPG" alt="Photo of Lei Shu" />
         <h1>Lei Shu</h1>
         <p class="subtitle">Research Scientist at Google DeepMind</p>
@@ -192,6 +193,27 @@
             }
             window.addEventListener('scroll', onScroll); onScroll();
         })();
+    </script>
+
+    <!-- Hero scene. Non-interactive here so the wheel keeps scrolling the page;
+         the standalone version at /shanshui.html can be orbited and zoomed. -->
+    <script type="importmap">
+    { "imports": { "three": "./assets/js/three.module.min.js" } }
+    </script>
+    <script type="module">
+        import { mountInkLandscape } from './assets/js/ink-landscape.js';
+        const canvas = document.getElementById('hero-scene');
+        // Leave the painted background in place on machines that would rather
+        // not animate, and where WebGL is unavailable.
+        if (canvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            try {
+                // Aim right of the falls so it clears the centred text column
+                mountInkLandscape({ canvas, interactive: false, panX: 9 });
+                document.querySelector('.hero').classList.add('hero-live');
+            } catch (e) {
+                console.warn('hero scene unavailable:', e);
+            }
+        }
     </script>
 </body>
 </html>
