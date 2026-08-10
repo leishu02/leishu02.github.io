@@ -463,14 +463,16 @@ const falls = new THREE.Mesh(
 
         float xc = x;
 
-        // one dominant fall with lesser strands beside it — a gorge
-        // concentrates its water rather than spreading it evenly
+        // The strands must span the whole sheet. Clustering them near the
+        // middle left the painted water far narrower than the channel feeding
+        // it — the geometry was the right width all along, but only the middle
+        // of it was ever water.
         float m = 0.0;
-        m = max(m, ribbon(xc, 0.500, 0.150));
-        m = max(m, ribbon(xc, 0.355, 0.055));
-        m = max(m, ribbon(xc, 0.655, 0.048));
-        m = max(m, ribbon(xc, 0.245, 0.028));
-        m = max(m, ribbon(xc, 0.775, 0.024));
+        m = max(m, ribbon(xc, 0.500, 0.300));
+        m = max(m, ribbon(xc, 0.215, 0.150));
+        m = max(m, ribbon(xc, 0.790, 0.140));
+        m = max(m, ribbon(xc, 0.070, 0.075));
+        m = max(m, ribbon(xc, 0.930, 0.070));
 
         // Fine threads varying ONLY across the sheet, so the strands stay dead
         // vertical — any y term here bands the silk. Motion is sideways drift.
@@ -525,7 +527,7 @@ const falls = new THREE.Mesh(
 
         // The loop turns tangent to the eye at the curtain's edges, piling many
         // fragments into one pixel; feather them wide or they stack into a flap.
-        m *= smoothstep(0.02, 0.17, x) * smoothstep(0.98, 0.83, x);
+        m *= smoothstep(0.005, 0.055, x) * smoothstep(0.995, 0.945, x);
 
         // Where it lands: a soft mound of foam sitting ON the water. Kept low
         // and steady — a bright pulsing band here reads as a jet, not a plunge.
@@ -954,33 +956,36 @@ function mistTexture() {
 }
 const mistTex = mistTexture();
 const mists = [];
-for (let i = 0; i < 30; i++) {
+/* Keep the haze off the near field. A sprite this size sitting between the eye
+   and the valley spans the whole frame and lays a pale slab over everything —
+   it was reading as a river far wider than the fall it feeds. */
+for (let i = 0; i < 26; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    opacity: 0.16 + rnd() * 0.26, color: PAPER,
+    opacity: 0.10 + rnd() * 0.20, color: PAPER,
   }));
-  const z = 12 - rnd() * 190;
-  sp.position.set((rnd() - 0.5) * 210, 1.4 + rnd() * 17, z);
-  const s = 34 + rnd() * 82;
-  sp.scale.set(s, s * (0.24 + rnd() * 0.18), 1);
+  const z = -26 - rnd() * 165;
+  sp.position.set((rnd() - 0.5) * 200, 1.4 + rnd() * 16, z);
+  const s = 26 + rnd() * 56;
+  sp.scale.set(s, s * (0.20 + rnd() * 0.16), 1);
   sp.userData = { sp: 0.10 + rnd() * 0.26, ph: rnd() * Math.PI * 2, y: sp.position.y };
   mists.push(sp); scene.add(sp);
 }
 
 /* Spray thrown up where the stream lands, plus an additive bloom over the
    sheet itself — the falls should read as the one lit thing in the valley. */
-for (let i = 0; i < 14; i++) {
+for (let i = 0; i < 12; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    opacity: 0.22 + rnd() * 0.26, color: PAPER,
+    opacity: 0.16 + rnd() * 0.20, color: PAPER,
   }));
   sp.position.set(
-    riverX(FALL_BOT) + (rnd() - 0.5) * 22,
-    0.4 + rnd() * 7,
-    FALL_BOT + (rnd() - 0.5) * 15
+    FALL_CX + (rnd() - 0.5) * 18,
+    0.4 + rnd() * 5.5,
+    FALL_BOT + 1 + rnd() * 9
   );
-  const s = 11 + rnd() * 18;
-  sp.scale.set(s, s * (0.40 + rnd() * 0.30), 1);
+  const s = 9 + rnd() * 13;
+  sp.scale.set(s, s * (0.40 + rnd() * 0.28), 1);
   sp.userData = { sp: 0, ph: rnd() * Math.PI * 2, y: sp.position.y };
   mists.push(sp); scene.add(sp);
 }
