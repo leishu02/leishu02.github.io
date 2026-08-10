@@ -93,9 +93,18 @@ const riverX = z => Math.sin(z * 0.015) * 4.5 + Math.sin(z * 0.0055) * 3.0;
 const FALL_TOP = -56, FALL_BOT = -50, FALL_H = 24;
 const bedAt = z => FALL_H * (1 - sstep(FALL_TOP, FALL_BOT, z));
 
+const LIP_CX = riverX(FALL_TOP - 0.5);
+
 function terrainHeight(x, z) {
-  const d = Math.abs(x - riverX(z));
-  const valley = sstep(6, 24, d);                  // 0 in the water, 1 in the hills
+  // A fall excavates a basin wider than itself, and that basin sits under the
+  // lip — not on the meander line, which has already wandered off by the time
+  // the water lands. Without this the channel pinched in from one side and the
+  // pool came out narrower than the curtain feeding it.
+  const basin = sstep(34, 2, Math.abs(z - (FALL_BOT + 9)));
+  const cx = riverX(z) + (LIP_CX - riverX(z)) * basin;
+  const d = Math.abs(x - cx);
+  const inner = 6 + 7 * basin;
+  const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
   let h = ridged(x * 0.0115, z * 0.0115, 5);
