@@ -186,6 +186,7 @@ const water = new THREE.Mesh(
       fallTop: { value: FALL_TOP },
       fallBot: { value: FALL_BOT },
       fallH:   { value: FALL_H },
+      fallCx:  { value: 0 },          // set once the channel has been measured
       fogColor:{ value: scene.fog.color },
       fogDensity: { value: scene.fog.density },
     },
@@ -221,7 +222,7 @@ const water = new THREE.Mesh(
       #include <common>
       #include <fog_pars_fragment>
       uniform vec3 water, paper;
-      uniform float uTime, fallBot;
+      uniform float uTime, fallBot, fallCx;
       varying vec3  vView;
       varying vec3  vWorld;
       varying float vFall;
@@ -285,6 +286,14 @@ const water = new THREE.Mesh(
         // torn into streamers by the same lengthwise field as the rest of the river
         wake *= 0.55 + 0.45 * (0.5 + 0.5 * sin(p.x * 1.6 + r * 1.2));
         col = mix(col, vec3(1.0), wake * 0.42);
+
+        // The churn where the column actually strikes. Without it the pool
+        // simply begins along a straight line in z and the seam is obvious.
+        vec2 q = vec2((p.x - fallCx) / 11.0, (p.y - fallBot - 3.0) / 8.0);
+        float churn = exp(-dot(q, q) * 1.5);
+        churn *= 0.52 + 0.48 * (0.5 + 0.5 * sin(p.x * 2.3 + p.y * 1.9 + t * 2.4))
+                      * (0.5 + 0.5 * sin(p.x * 5.1 - p.y * 3.3 - t * 3.1));
+        col = mix(col, vec3(1.0), clamp(churn, 0.0, 1.0) * 0.60);
 
         gl_FragColor = vec4(col, 0.94);
         #include <fog_fragment>
@@ -498,18 +507,22 @@ const falls = new THREE.Mesh(
         // Upstream the sheet dissolves into the river's own surface, so the two
         // hand over rather than butting together at a visible seam.
         m *= smoothstep(1.42, 1.03, y);
-        // and it keeps its body all the way into the water
-        m *= mix(0.62, 1.0, smoothstep(-0.16, 0.30, y));
+        // Nothing of the sheet survives below the surface: its sub-surface part
+        // was laying a flat ghost rectangle across the pool.
+        if (y < -0.05) discard;
+        // and the strands dissolve on the way in rather than being cut off
+        m *= smoothstep(-0.02, 0.30, y);
 
         // The loop turns tangent to the eye at the curtain's edges, piling many
         // fragments into one pixel; feather them wide or they stack into a flap.
         m *= smoothstep(0.005, 0.055, x) * smoothstep(0.995, 0.945, x);
 
-        // Where it lands: a soft mound of foam sitting ON the water. Kept low
-        // and steady — a bright pulsing band here reads as a jet, not a plunge.
-        float foam = pow(1.0 - smoothstep(-0.10, 0.26, y), 1.6)
-                   * smoothstep(0.14, 0.34, x) * smoothstep(0.86, 0.66, x)
-                   * (0.80 + 0.20 * sin(x * 9.0 - t * 0.9));
+        // Where it lands: a soft band of foam gathered at the waterline itself,
+        // widest where the sheet is heaviest. The pool carries the rest.
+        float band = exp(-pow((y - 0.06) / 0.21, 2.0));
+        float foam = band
+                   * smoothstep(0.06, 0.26, x) * smoothstep(0.94, 0.74, x)
+                   * (0.72 + 0.28 * sin(x * 11.0 - t * 1.1));
 
         // Where the shell turns edge-on, front and back pile into the same
         // pixels and stack into a hard bright rib. Fade by facing ratio.
@@ -530,6 +543,7 @@ const falls = new THREE.Mesh(
 // centred on the wet channel, which is not the meander line when the banks differ
 falls.position.set(FALL_CX, 0, 0);
 falls.renderOrder = 2;   // transparents sort by object centre; the river's is much nearer
+water.material.uniforms.fallCx.value = FALL_CX;   // now that the channel is measured
 scene.add(falls);
 
 const fallLayers = [falls];
@@ -960,7 +974,7 @@ controls.panSpeed = 0.6;
 controls.minDistance = 3;
 controls.maxDistance = 190;
 controls.maxPolarAngle = Math.PI * 0.495;   // never duck below the waterline
-controls.target.set(riverX(fallMid), FALL_H * 0.45, FALL_BOT - 2);
+controls.target.set(FALL_CX, FALL_H * 0.40, FALL_BOT - 2);
 
 let userDriving = false;
 controls.addEventListener('start', () => { userDriving = true; });
@@ -978,7 +992,7 @@ addEventListener('resize', () => {
 });
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(-4, 9.0, -54);
+const look = new THREE.Vector3(FALL_CX, 8.5, FALL_BOT - 4);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -990,9 +1004,9 @@ function frame() {
     controls.update();
   } else {
     // stood well back, so the whole fall and the cliff it comes over are in frame
-    camera.position.x = 0.5 + ptr.x * 5.0 + Math.sin(t * 0.10) * 1.5;
-    camera.position.y = 21 - ptr.y * 3.5 + Math.sin(t * 0.14) * 0.45;
-    camera.position.z = 54 + Math.cos(t * 0.08) * 1.4;
+    camera.position.x = FALL_CX + 3.5 + ptr.x * 4.5 + Math.sin(t * 0.10) * 1.4;
+    camera.position.y = 17 - ptr.y * 3.0 + Math.sin(t * 0.14) * 0.40;
+    camera.position.z = 44 + Math.cos(t * 0.08) * 1.3;
     camera.lookAt(look);
   }
 
