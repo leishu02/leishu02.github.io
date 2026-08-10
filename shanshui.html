@@ -68,7 +68,7 @@ import * as THREE from 'three';
 const PAPER      = new THREE.Color('#eef2f2');
 const INK_NEAR   = new THREE.Color('#2b4150');
 const INK_MID    = new THREE.Color('#5c7d8e');
-const WATER_INK  = new THREE.Color('#7fa4ba');
+const WATER_INK  = new THREE.Color('#5d8ba6');
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -82,7 +82,7 @@ document.body.appendChild(renderer.domElement);
 const scene  = new THREE.Scene();
 scene.fog    = new THREE.FogExp2(PAPER.getHex(), 0.0092);
 
-const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 700);
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 700);
 camera.position.set(0, 5.2, 34);
 
 /* ── noise: value fbm + ridged multifractal ─────────────────── */
@@ -107,16 +107,22 @@ function ridged(x, y, oct = 5) {
 const sstep = (e0, e1, x) => { const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1); return t * t * (3 - 2 * t); };
 
 /* the river meanders — terrain is carved around this centreline */
-const riverX = z => Math.sin(z * 0.021) * 7.5 + Math.sin(z * 0.0067) * 5.0;
+const riverX = z => Math.sin(z * 0.015) * 4.5 + Math.sin(z * 0.0055) * 3.0;
+
+/* The valley floor sits one step higher upstream, so the stream has to fall
+   to reach the viewer. Terrain and water both ride this same curve. */
+const FALL_TOP = -55, FALL_BOT = -45, FALL_H = 11;
+const bedAt = z => FALL_H * (1 - sstep(FALL_TOP, FALL_BOT, z));
 
 function terrainHeight(x, z) {
   const d = Math.abs(x - riverX(z));
-  const valley = sstep(5, 21, d);                  // 0 in the water, 1 in the hills
-  const far    = 0.16 + 1.85 * sstep(10, -190, z); // ranges grow with distance
+  const valley = sstep(6, 24, d);                  // 0 in the water, 1 in the hills
+  // near banks still need real relief, or the stream spreads out into a lake
+  const far    = 0.55 + 1.55 * sstep(10, -190, z); // ranges grow with distance
   let h = ridged(x * 0.0115, z * 0.0115, 5);
   h = Math.pow(h, 1.45) * 30 * valley * far;
   h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
-  return h;
+  return bedAt(z) + h;
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -127,8 +133,11 @@ const tGeo = new THREE.PlaneGeometry(TW, TD, SEG, SEG);
 {
   const p = tGeo.attributes.position;
   for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i);     // plane lies in XY, we displace +Z
-    p.setZ(i, terrainHeight(x, -y - 90));   // shift so the valley runs away from camera
+    // plane lies in XY and is displaced along +Z; after the -90° X rotation
+    // world z is -y, so the field must be sampled there and nowhere else —
+    // any offset here and the carved channel drifts off the actual river
+    const x = p.getX(i), y = p.getY(i);
+    p.setZ(i, terrainHeight(x, -y));
   }
   tGeo.computeVertexNormals();
 }
@@ -182,13 +191,17 @@ scene.add(terrain);
    WATER — rippling plane, sky-pale at grazing angles
    ══════════════════════════════════════════════════════════════ */
 const water = new THREE.Mesh(
-  new THREE.PlaneGeometry(300, 460, 220, 220),
+  // dense along its length so the lip of the falls stays a crisp edge
+  new THREE.PlaneGeometry(300, 460, 200, 460),
   new THREE.ShaderMaterial({
     fog: true, transparent: true,
     uniforms: {
       uTime:   { value: 0 },
       water:   { value: WATER_INK },
       paper:   { value: PAPER },
+      fallTop: { value: FALL_TOP },
+      fallBot: { value: FALL_BOT },
+      fallH:   { value: FALL_H },
       fogColor:{ value: scene.fog.color },
       fogDensity: { value: scene.fog.density },
     },
@@ -196,12 +209,21 @@ const water = new THREE.Mesh(
       #include <common>
       #include <fog_pars_vertex>
       uniform float uTime;
-      varying vec3 vView;
-      varying vec3 vWorld;
+      uniform float fallTop, fallBot, fallH;
+      varying vec3  vView;
+      varying vec3  vWorld;
+      varying float vFall;     // 0 on flat water, 1 in the throat of the falls
       void main() {
+        vec3 pos = position;
+
+        // after the mesh rotation world z is -y, so the bed is sampled there
+        float wz = -pos.y;
+        float s  = smoothstep(fallTop, fallBot, wz);
+        pos.z += fallH * (1.0 - s);
+        vFall  = 1.0 - abs(s * 2.0 - 1.0);
+
         // only the long, slow swell is real geometry — the fine grain of the
         // surface is drawn per pixel, where it can never be under-sampled
-        vec3 pos = position;
         pos.z += sin(pos.x * 0.16 + uTime * 0.45) * 0.055
                + sin(pos.y * 0.11 - uTime * 0.33) * 0.045;
 
@@ -216,19 +238,33 @@ const water = new THREE.Mesh(
       #include <fog_pars_fragment>
       uniform vec3 water, paper;
       uniform float uTime;
-      varying vec3 vView;
-      varying vec3 vWorld;
+      varying vec3  vView;
+      varying vec3  vWorld;
+      varying float vFall;
 
-      // Ripple lines run ACROSS the current and only waver — a field built from
-      // crossed waves alone closes into blobs and reads as a contour map.
+      // Crossed swells, every one of them advecting toward +z — that is toward
+      // the viewer, so the whole surface carries downstream from the falls.
+      // No linear ramp: it only served to rank contour lines.
       float ripple(vec2 p, float t) {
-        float r = p.y * 0.62;                                  // downstream ranks
-        r += sin(p.x * 0.15 + t * 0.30) * 1.05;                // slow meander
-        r += sin(p.x * 0.34 - t * 0.48) * 0.48;
-        r += sin(p.x * 0.71 + p.y * 0.09 - t * 0.72) * 0.22;
-        r += sin(p.y * 0.26 + t * 0.62) * 0.26;                // swell passing
-        r += sin(p.x * 1.55 - p.y * 0.18 + t * 1.05) * 0.085;  // fine chop
+        float r = 0.0;
+        r += sin(p.x * 0.21 + p.y * 0.33 - t * 1.05) * 1.00;
+        r += sin(p.x * 0.37 - p.y * 0.24 + t * 0.78) * 0.62;
+        r += sin(p.x * 0.09 + p.y * 0.71 - t * 1.60) * 0.34;
+        r += sin(p.x * 0.83 + p.y * 0.46 - t * 1.25) * 0.18;
+        r += sin(p.x * 1.41 - p.y * 1.13 + t * 1.85) * 0.09;
         return r;
+      }
+
+      // One stroke per period of v, half-width w. Antialiased by its own
+      // screen gradient, and faded out entirely once a pixel spans more than
+      // the stroke itself — otherwise a grazing surface turns solid white.
+      float stroke(float v, float w) {
+        float g  = abs(fract(v) - 0.5);
+        float aa = clamp(fwidth(v) * 0.5, 0.0004, 0.30);
+        // edges MUST stay ordered — handing smoothstep e0 > e1 turns the line
+        // into a full-period ramp, which floods the surface instead of drawing on it
+        float m  = 1.0 - smoothstep(max(w - aa, 0.0), w + aa, g);
+        return m * (1.0 - smoothstep(w * 1.5, w * 5.0, aa));
       }
 
       void main() {
@@ -237,25 +273,39 @@ const water = new THREE.Mesh(
 
         // grazing angles catch a little sky, but the river keeps its ink
         float fres = pow(1.0 - abs(normalize(vView).y), 2.6);
-        vec3 col = mix(water, paper, 0.12 + 0.42 * fres);
+        vec3 col = mix(water, paper, 0.16 + 0.34 * fres);
 
-        float r = ripple(p, t);
+        // The surface is shaded by its own slope rather than drawn as contour
+        // lines: contours of a downstream-ranked field are by definition
+        // horizontal bands, and no amount of tuning makes stripes look like water.
+        float r  = ripple(p, t);
+        float dx = ripple(p + vec2(0.85, 0.0), t) - r;
+        float dz = ripple(p + vec2(0.0, 0.85), t) - r;
+        vec3  n  = normalize(vec3(-dx, 2.4, -dz));
 
-        // fine contour strokes along the surface, antialiased by their own
-        // screen-space gradient so they never alias into moiré at distance
-        float v  = r * 1.15;
-        float g  = abs(fract(v) - 0.5);
-        float aa = fwidth(v);
-        float line = 1.0 - smoothstep(0.0, aa * 1.9, g);
+        float lam = clamp(dot(n, normalize(vec3(0.35, 1.0, 0.22))), 0.0, 1.0);
+        col *= 0.93 + 0.11 * lam;                       // soft undulation
+        col  = mix(col, paper, pow(lam, 5.0) * 0.30);   // sheen on faces turned to the light
 
-        // strokes thin out toward the horizon, as a brush would run dry
-        line *= smoothstep(0.0, 0.045, aa) * (1.0 - smoothstep(0.16, 0.55, aa));
+        // a sheen travelling downstream toward the eye, so the current is legible
+        float travel = 0.5 + 0.5 * sin(p.x * 0.09 + p.y * 0.21 - t * 1.30);
+        col = mix(col, paper, pow(lam, 8.0) * travel * 0.24);
 
-        col = mix(col, water * 0.58, line * 0.50);
+        // THE FALLS — the bed drops away and the water tears into fast threads,
+        // going to light at the lip and dissolving into its own spray.
+        if (vFall > 0.01) {
+          float race = p.y * 4.2 - t * 7.0 + sin(p.x * 1.7 + t * 0.6) * 0.9;
+          float threads = stroke(race, 0.20) * 0.9
+                        + stroke(race * 2.3 + 0.5, 0.14) * 0.55
+                        + stroke(race * 5.1, 0.10) * 0.30;
+          threads = clamp(threads, 0.0, 1.0);
 
-        // and a colder sheen just off each crest
-        float crest = smoothstep(0.55, 1.35, r);
-        col = mix(col, paper, crest * 0.22);
+          // soft light bleeding off the sheet, brightest mid-drop
+          float glow = pow(vFall, 1.4);
+          col = mix(col, vec3(1.0), threads * vFall * 0.85);
+          col = mix(col, paper, glow * 0.55);
+          col += vec3(0.10, 0.13, 0.15) * glow;   // the dreamy lift
+        }
 
         gl_FragColor = vec4(col, 0.94);
         #include <fog_fragment>
@@ -274,7 +324,7 @@ function leafGeometry() {
   for (let i = 0; i <= S; i++) {
     const t = i / S;
     const w = Math.sin(Math.pow(t, 0.72) * Math.PI) * 0.5 * (1 - t * 0.30);
-    const bend = -Math.pow(t, 2.1) * 0.62;
+    const bend = -Math.pow(t, 2.3) * 0.28;   // a bamboo blade barely curls
     pos.push(-w, t, bend, w, t, bend);
     uv.push(0, t, 1, t);
   }
@@ -354,9 +404,9 @@ const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 42949672
 
 function addStalk(x, z, h, r) {
   const ground = terrainHeight(x, z);
-  // bamboo grows on the bank, never in the stream — clear of both the
-  // waterline and the channel itself
-  if (ground < 1.1) return;
+  // bamboo grows on the bank, never in the stream — clear of both the local
+  // waterline (which steps up above the falls) and the channel itself
+  if (ground < bedAt(z) + 1.1) return;
   if (Math.abs(x - riverX(z)) < 9.5) return;
   stalks.push({
     x, z,
@@ -371,28 +421,26 @@ function addStalk(x, z, h, r) {
   });
 }
 
-/* groves receding up both banks */
-for (let c = 0; c < 30; c++) {
-  const z    = 22 - Math.pow(rnd(), 0.58) * 145;
+/* Groves along both banks, receding into the mist. Nothing is placed close
+   enough to crowd the lens — the eye should land on the water first. */
+for (let c = 0; c < 34; c++) {
+  const z    = 6 - Math.pow(rnd(), 0.55) * 150;
   const side = rnd() < 0.5 ? -1 : 1;
-  const cx   = riverX(z) + side * (11 + rnd() * 22);
+  const cx   = riverX(z) + side * (11 + rnd() * 20);
   const n    = 3 + Math.floor(rnd() * 4);
   for (let i = 0; i < n; i++) {
     const x  = cx + (rnd() - 0.5) * 6;
-    const zz = z + (rnd() - 0.5) * 6;
-    addStalk(x, zz, 10 + rnd() * 11, 0.17 + rnd() * 0.11);
+    const zz = z + (rnd() - 0.5) * 7;
+    addStalk(x, zz, 10 + rnd() * 11, 0.16 + rnd() * 0.10);
   }
 }
 
-/* Mass on the left bank, void on the right — the oldest composition there is.
-   These are the only stalks close enough to actually fill the frame edge. */
-for (let i = 0; i < 26; i++) {
-  const z = 24 - rnd() * 20;
-  addStalk(riverX(z) - (11 + rnd() * 10), z, 13 + rnd() * 10, 0.20 + rnd() * 0.12);
-}
-for (let i = 0; i < 22; i++) {
-  const z = 14 - rnd() * 24;
-  addStalk(riverX(z) + (11 + rnd() * 11), z, 15 + rnd() * 11, 0.18 + rnd() * 0.11);
+/* A light screen of nearer culms on each bank — enough to frame, not to block */
+for (const side of [-1, 1]) {
+  for (let i = 0; i < 5; i++) {
+    const z = 16 - rnd() * 18;
+    addStalk(riverX(z) + side * (13 + rnd() * 9), z, 13 + rnd() * 9, 0.18 + rnd() * 0.09);
+  }
 }
 
 /* Pre-roll the foliage so it doesn't shimmer between frames.
@@ -427,13 +475,14 @@ for (let s = 0; s < stalks.length; s++) {
 
       const nl = 7 + Math.floor(rnd() * 2 + near * 4);
       for (let l = 0; l < nl; l++) {
-        const len = bLen * (1.0 + rnd() * 0.85) * (1.0 + (1 - near) * 0.75);
+        const len = bLen * (0.42 + rnd() * 0.32) * (1.0 + (1 - near) * 0.5);
         leafPlan.push({
           b: bi,
-          // leaves spray ALONG the twig, not in a pom-pom at its tip
-          along:  0.34 + (l / Math.max(1, nl - 1)) * 0.66 + (rnd() - 0.5) * 0.12,
-          spread: (l % 2 ? 1 : -1) * (0.55 + rnd() * 0.55),
-          pitch:  1.30 + rnd() * 0.55,          // long blades, hanging
+          // leaves alternate along the twig rather than bunching at its tip
+          along:  0.30 + (l / Math.max(1, nl - 1)) * 0.70 + (rnd() - 0.5) * 0.09,
+          // fanned to alternating sides OF THE BRANCH, not of the world
+          spread: (l % 2 ? 1 : -1) * (0.24 + rnd() * 0.48),
+          droop:  -0.10 + rnd() * 0.30,         // held out stiffly, barely dipping
           len,
           wid:    len * (0.085 + rnd() * 0.04), // a bamboo leaf is ~10× longer than wide
           ph:     rnd() * Math.PI * 2,
@@ -505,13 +554,35 @@ for (const br of branchPlan) {
   push(branchD, M.compose(ORIGIN, Q, S3), ...br._sway, st.sp, st.ph);
 }
 
+/* Every leaf is built in its own branch's frame: it continues along the twig,
+   fans to one side of it, and hangs. Orienting leaves in world space instead
+   is what made the sprays look scattered. */
+const LDIR = new THREE.Vector3(), SIDE = new THREE.Vector3();
+const XA = new THREE.Vector3(), YA = new THREE.Vector3(), ZA = new THREE.Vector3();
+
 for (const lf of leafPlan) {
   const br = branchPlan[lf.b];
   TIP.copy(br._dir).multiplyScalar(br.len * lf.along).add(br._org);
-  E.set(lf.pitch, br.yaw + lf.spread, 0, 'YXZ');
-  Q.setFromEuler(E);
+
+  SIDE.crossVectors(UP, br._dir);
+  if (SIDE.lengthSq() < 1e-6) SIDE.set(1, 0, 0);
+  SIDE.normalize();
+
+  LDIR.copy(br._dir).multiplyScalar(Math.cos(lf.spread))
+      .addScaledVector(SIDE, Math.sin(lf.spread))
+      .addScaledVector(UP, -lf.droop)
+      .normalize();
+
+  // blade runs along +Y; its curl (toward -Z) must fall downward
+  YA.copy(LDIR);
+  ZA.copy(UP).addScaledVector(YA, -UP.dot(YA));
+  if (ZA.lengthSq() < 1e-6) ZA.set(0, 0, 1);
+  ZA.normalize();
+  XA.crossVectors(YA, ZA).normalize();
+
   S3.set(lf.wid, lf.len, lf.len);
-  push(leafD, M.compose(TIP, Q, S3), ...br._sway, br._t[0], br._t[1]);
+  M.makeBasis(XA, YA, ZA).scale(S3).setPosition(TIP);
+  push(leafD, M, ...br._sway, br._t[0], br._t[1]);
 }
 
 function buildMesh(geo, mat, data) {
@@ -566,6 +637,40 @@ for (let i = 0; i < 30; i++) {
   mists.push(sp); scene.add(sp);
 }
 
+/* Spray thrown up where the stream lands, plus an additive bloom over the
+   sheet itself — the falls should read as the one lit thing in the valley. */
+for (let i = 0; i < 14; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: mistTex, transparent: true, depthWrite: false,
+    opacity: 0.22 + rnd() * 0.26, color: PAPER,
+  }));
+  sp.position.set(
+    riverX(FALL_BOT) + (rnd() - 0.5) * 22,
+    0.4 + rnd() * 7,
+    FALL_BOT + (rnd() - 0.5) * 15
+  );
+  const s = 11 + rnd() * 18;
+  sp.scale.set(s, s * (0.40 + rnd() * 0.30), 1);
+  sp.userData = { sp: 0, ph: rnd() * Math.PI * 2, y: sp.position.y };
+  mists.push(sp); scene.add(sp);
+}
+for (let i = 0; i < 5; i++) {
+  const gl = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: mistTex, transparent: true, depthWrite: false,
+    blending: THREE.AdditiveBlending, opacity: 0.16 + rnd() * 0.14,
+    color: new THREE.Color('#dbeaf2'),
+  }));
+  gl.position.set(
+    riverX((FALL_TOP + FALL_BOT) / 2) + (rnd() - 0.5) * 12,
+    FALL_H * (0.25 + rnd() * 0.5),
+    (FALL_TOP + FALL_BOT) / 2 + (rnd() - 0.5) * 8
+  );
+  const s = 16 + rnd() * 16;
+  gl.scale.set(s, s * 0.85, 1);
+  gl.userData = { sp: 0, ph: rnd() * Math.PI * 2, y: gl.position.y };
+  mists.push(gl); scene.add(gl);
+}
+
 /* 飛鳥 — two strokes of the brush, nothing more */
 function birdTexture() {
   const c = document.createElement('canvas');
@@ -581,14 +686,16 @@ function birdTexture() {
 }
 const birdTex = birdTexture();
 const birds = [];
-for (let i = 0; i < 7; i++) {
+/* a skein of birds crossing the far valley, well above the ridgelines */
+for (let i = 0; i < 16; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: birdTex, transparent: true, depthWrite: false, opacity: 0.34 + rnd() * 0.22,
+    map: birdTex, transparent: true, depthWrite: false, opacity: 0.30 + rnd() * 0.30,
   }));
-  sp.position.set((rnd() - 0.5) * 130, 20 + rnd() * 20, -30 - rnd() * 120);
-  const s = 1.5 + rnd() * 1.7;
+  const z = -55 - rnd() * 110;
+  sp.position.set((rnd() - 0.5) * 120, 26 + rnd() * 26, z);
+  const s = 1.9 + rnd() * 2.4;
   sp.scale.set(s, s, 1);
-  sp.userData = { sp: 0.9 + rnd() * 1.1, ph: rnd() * Math.PI * 2, y: sp.position.y };
+  sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y };
   birds.push(sp); scene.add(sp);
 }
 
@@ -606,7 +713,7 @@ addEventListener('resize', () => {
 });
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(1.5, 7, -70);
+const look = new THREE.Vector3(-2, 3.0, -46);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -614,10 +721,10 @@ function frame() {
   ptr.x += (aim.x - ptr.x) * 0.035;
   ptr.y += (aim.y - ptr.y) * 0.035;
 
-  // the eye stands on the left bank, under the bamboo, looking downstream
-  camera.position.x = -5.5 + ptr.x * 4.5 + Math.sin(t * 0.10) * 1.4;
-  camera.position.y = 5.4 - ptr.y * 1.9 + Math.sin(t * 0.14) * 0.35;
-  camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
+  // the eye sits over the stream itself, looking straight up the valley
+  camera.position.x = 2.5 + ptr.x * 4.5 + Math.sin(t * 0.10) * 1.4;
+  camera.position.y = 19 - ptr.y * 3.0 + Math.sin(t * 0.14) * 0.4;
+  camera.position.z = 46 + Math.cos(t * 0.08) * 1.2;
   camera.lookAt(look);
 
   water.material.uniforms.uTime.value = t;
