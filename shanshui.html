@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>山水 · Three.js Ink Landscape</title>
+<title>Ink Landscape — Bamboo Gorge</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body { height: 100%; overflow: hidden; background: #eef2f2; }
@@ -16,43 +16,19 @@
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='0.35'/></svg>");
   }
 
-  /* seal + title, classic scroll placement */
-  .mark {
-    position: fixed; z-index: 3; pointer-events: none;
-    left: 46px; top: 42px;
-    font: 300 13px/1.9 "Songti SC", "STSong", "SimSun", Georgia, serif;
-    color: rgba(38, 58, 70, .52);
-    letter-spacing: .42em;
-    writing-mode: vertical-rl;
-  }
-  .seal {
-    position: fixed; z-index: 3; pointer-events: none;
-    left: 44px; top: 190px;
-    width: 30px; height: 30px;
-    background: #9e3b30;
-    display: grid; place-items: center;
-    font: 600 13px/1 "Songti SC", "STSong", serif;
-    color: #f4ece2; letter-spacing: 0;
-    opacity: .82;
-  }
   .hint {
     position: fixed; z-index: 3; pointer-events: none;
     bottom: 26px; right: 34px;
-    font: 300 11px/1 "Songti SC", Georgia, serif;
-    color: rgba(38, 58, 70, .34);
-    letter-spacing: .3em;
-  }
-  @media (max-width: 640px) {
-    .mark { left: 22px; top: 26px; font-size: 12px; }
-    .seal { left: 21px; top: 158px; }
+    font: 300 10px/1 Georgia, serif;
+    color: rgba(38, 58, 70, .30);
+    letter-spacing: .26em;
+    text-transform: uppercase;
   }
 </style>
 </head>
 <body>
 
-<div class="mark">竹 溪 遠 岫</div>
-<div class="seal">舒</div>
-<div class="hint">拖 曳 環 顧 · 滾 動 推 近</div>
+<div class="hint">drag to look &middot; scroll to zoom</div>
 <div class="grain"></div>
 
 <script type="importmap">
@@ -64,7 +40,7 @@ import * as THREE from 'three';
 import { OrbitControls } from './assets/js/three/OrbitControls.js';
 
 /* ══════════════════════════════════════════════════════════════
-   宣纸 · palette — every colour derived from ink diluted on paper
+   Palette — every colour derived from ink diluted on paper
    ══════════════════════════════════════════════════════════════ */
 const PAPER      = new THREE.Color('#eef2f2');
 const INK_NEAR   = new THREE.Color('#2b4150');
@@ -320,7 +296,7 @@ water.position.y = 0.28;
 scene.add(water);
 
 /* ══════════════════════════════════════════════════════════════
-   瀑布 · THE FALLS — vertical curtains over the cliff face
+   THE FALLS — vertical curtains over the cliff face
    A long exposure is what makes a waterfall look like silk: the strands
    stay perfectly vertical and smooth, so nearly all the variation lives
    across the sheet, almost none along it.
@@ -559,7 +535,7 @@ scene.add(falls);
 const fallLayers = [falls];
 
 /* ══════════════════════════════════════════════════════════════
-   竹 · BAMBOO — instanced segments, node rings, leaves
+   BAMBOO — instanced segments, node rings, leaves
    ══════════════════════════════════════════════════════════════ */
 function leafGeometry() {
   const S = 4, pos = [], uv = [], idx = [];
@@ -871,10 +847,10 @@ buildMesh(stalkGeo,  inkMat('#1e2f26', '#4d6549'), segD);
 buildMesh(ringGeo,   inkMat('#1a2619', '#33452c'), ringD);
 buildMesh(branchGeo, inkMat('#1b2a1c', '#3a5033'), branchD);
 buildMesh(leafGeo,   inkMat('#2b3a28', '#576d4a'), leafD);
-console.log(`竹 ${stalks.length} culms · ${branchD.length} branches · ${leafD.length} leaves`);
+console.log(`bamboo:  culms · ${branchD.length} branches · ${leafD.length} leaves`);
 
 /* ══════════════════════════════════════════════════════════════
-   雲海 · MIST — the white that separates one range from the next
+   MIST — the white that separates one range from the next
    ══════════════════════════════════════════════════════════════ */
 function mistTexture() {
   const c = document.createElement('canvas');
@@ -941,7 +917,7 @@ for (let i = 0; i < 4; i++) {
   mists.push(gl); scene.add(gl);
 }
 
-/* 飛鳥 — two strokes of the brush, nothing more */
+/* Birds — two strokes of the brush, nothing more */
 function birdTexture() {
   const c = document.createElement('canvas');
   c.width = c.height = 64;
