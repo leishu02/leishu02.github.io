@@ -80,7 +80,7 @@ renderer.setClearColor(PAPER, 1);
 document.body.appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
-scene.fog    = new THREE.FogExp2(PAPER.getHex(), 0.0092);
+scene.fog    = new THREE.FogExp2(PAPER.getHex(), 0.0060);
 
 const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 700);
 camera.position.set(0, 5.2, 34);
@@ -111,14 +111,16 @@ const riverX = z => Math.sin(z * 0.015) * 4.5 + Math.sin(z * 0.0055) * 3.0;
 
 /* The valley floor sits one step higher upstream, so the stream has to fall
    to reach the viewer. Terrain and water both ride this same curve. */
-const FALL_TOP = -55, FALL_BOT = -45, FALL_H = 11;
+/* A short z-span makes the bed a cliff rather than a ramp; the falling sheet
+   itself is a dedicated mesh hung in front of it. */
+const FALL_TOP = -62, FALL_BOT = -50, FALL_H = 24;
 const bedAt = z => FALL_H * (1 - sstep(FALL_TOP, FALL_BOT, z));
 
 function terrainHeight(x, z) {
   const d = Math.abs(x - riverX(z));
   const valley = sstep(6, 24, d);                  // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
-  const far    = 0.55 + 1.55 * sstep(10, -190, z); // ranges grow with distance
+  const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
   let h = ridged(x * 0.0115, z * 0.0115, 5);
   h = Math.pow(h, 1.45) * 30 * valley * far;
   h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
@@ -237,21 +239,21 @@ const water = new THREE.Mesh(
       #include <common>
       #include <fog_pars_fragment>
       uniform vec3 water, paper;
-      uniform float uTime;
+      uniform float uTime, fallBot;
       varying vec3  vView;
       varying vec3  vWorld;
       varying float vFall;
 
-      // Crossed swells, every one of them advecting toward +z — that is toward
-      // the viewer, so the whole surface carries downstream from the falls.
-      // No linear ramp: it only served to rank contour lines.
+      // Structure runs ALONG the current: strong variation across the stream,
+      // only a slow waver down it. That yields lengthwise threads rather than
+      // ranks marching at the viewer, which always read as horizontal bands.
       float ripple(vec2 p, float t) {
         float r = 0.0;
-        r += sin(p.x * 0.21 + p.y * 0.33 - t * 1.05) * 1.00;
-        r += sin(p.x * 0.37 - p.y * 0.24 + t * 0.78) * 0.62;
-        r += sin(p.x * 0.09 + p.y * 0.71 - t * 1.60) * 0.34;
-        r += sin(p.x * 0.83 + p.y * 0.46 - t * 1.25) * 0.18;
-        r += sin(p.x * 1.41 - p.y * 1.13 + t * 1.85) * 0.09;
+        r += sin(p.x * 0.62 + p.y * 0.06 - t * 0.85) * 1.00;
+        r += sin(p.x * 1.13 - p.y * 0.04 + t * 0.66) * 0.54;
+        r += sin(p.x * 0.31 + p.y * 0.09 - t * 0.52) * 0.42;
+        r += sin(p.x * 2.05 + p.y * 0.12 - t * 1.15) * 0.24;
+        r += sin(p.x * 3.60 - p.y * 0.08 + t * 1.55) * 0.11;
         return r;
       }
 
@@ -268,6 +270,11 @@ const water = new THREE.Mesh(
       }
 
       void main() {
+        // The cliff face belongs to the falls mesh and to bare rock — drop the
+        // river's own near-vertical sheet, which would otherwise paint a pale
+        // wall over both.
+        if (vFall > 0.06) discard;
+
         vec2 p = vWorld.xz;
         float t = uTime;
 
@@ -287,25 +294,9 @@ const water = new THREE.Mesh(
         col *= 0.93 + 0.11 * lam;                       // soft undulation
         col  = mix(col, paper, pow(lam, 5.0) * 0.30);   // sheen on faces turned to the light
 
-        // a sheen travelling downstream toward the eye, so the current is legible
-        float travel = 0.5 + 0.5 * sin(p.x * 0.09 + p.y * 0.21 - t * 1.30);
-        col = mix(col, paper, pow(lam, 8.0) * travel * 0.24);
-
-        // THE FALLS — the bed drops away and the water tears into fast threads,
-        // going to light at the lip and dissolving into its own spray.
-        if (vFall > 0.01) {
-          float race = p.y * 4.2 - t * 7.0 + sin(p.x * 1.7 + t * 0.6) * 0.9;
-          float threads = stroke(race, 0.20) * 0.9
-                        + stroke(race * 2.3 + 0.5, 0.14) * 0.55
-                        + stroke(race * 5.1, 0.10) * 0.30;
-          threads = clamp(threads, 0.0, 1.0);
-
-          // soft light bleeding off the sheet, brightest mid-drop
-          float glow = pow(vFall, 1.4);
-          col = mix(col, vec3(1.0), threads * vFall * 0.85);
-          col = mix(col, paper, glow * 0.55);
-          col += vec3(0.10, 0.13, 0.15) * glow;   // the dreamy lift
-        }
+        // foam carried out of the plunge basin, fading downstream
+        float basin = 1.0 - smoothstep(0.0, 26.0, abs(p.y - fallBot));
+        col = mix(col, vec3(1.0), pow(basin, 2.0) * 0.35);
 
         gl_FragColor = vec4(col, 0.94);
         #include <fog_fragment>
@@ -315,6 +306,106 @@ const water = new THREE.Mesh(
 water.rotation.x = -Math.PI / 2;
 water.position.y = 0.28;
 scene.add(water);
+
+/* ══════════════════════════════════════════════════════════════
+   瀑布 · THE FALLS — vertical curtains over the cliff face
+   A long exposure is what makes a waterfall look like silk: the strands
+   stay perfectly vertical and smooth, so nearly all the variation lives
+   across the sheet, almost none along it.
+   ══════════════════════════════════════════════════════════════ */
+const FALL_W = 22;
+const fallMid = (FALL_TOP + FALL_BOT) / 2;
+
+const falls = new THREE.Mesh(
+  new THREE.PlaneGeometry(FALL_W, FALL_H + 1.5, 1, 1),
+  new THREE.ShaderMaterial({
+    fog: true, transparent: true, depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime:      { value: 0 },
+      paper:      { value: PAPER },
+      fogColor:   { value: scene.fog.color },
+      fogDensity: { value: scene.fog.density },
+    },
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform float uTime;
+      uniform vec3  paper;
+      varying vec2  vUv;
+
+      // one vertical strand — edges kept tight so dark rock shows between falls
+      float ribbon(float x, float c, float w) {
+        return smoothstep(w, w * 0.62, abs(x - c));
+      }
+
+      void main() {
+        float x = vUv.x, y = vUv.y;   // y: 0 at the pool, 1 at the lip
+        float t = uTime;
+
+        // falling water fans out on the way down — sample the strands through a
+        // widening frame so the sheet is not a rectangle
+        float spread = 1.0 + (1.0 - y) * 0.22;
+        float xc = (x - 0.5) / spread + 0.5;
+
+        // one dominant fall with lesser strands beside it, rather than a row
+        // of equal curtains — a gorge concentrates its water
+        float m = 0.0;
+        m = max(m, ribbon(xc, 0.500, 0.150));
+        m = max(m, ribbon(xc, 0.355, 0.055));
+        m = max(m, ribbon(xc, 0.655, 0.048));
+        m = max(m, ribbon(xc, 0.245, 0.028));
+        m = max(m, ribbon(xc, 0.775, 0.024));
+
+        // water thins and brightens as it accelerates over the lip
+        m *= 1.0 + smoothstep(0.80, 1.0, y) * 0.45;
+
+        // Fine threads. Every one of these varies ONLY across the sheet, so the
+        // strands stay dead vertical — any y term here would band the silk.
+        // Motion comes from drifting the threads sideways, not down.
+        float d1 = x + sin(t * 0.23) * 0.004;
+        float d2 = x + sin(t * 0.17 + 2.1) * 0.006;
+        float fine = 0.66
+                   + 0.15 * (sin(d1 * 211.0) * 0.5 + 0.5)
+                   + 0.11 * (sin(d2 * 97.0 + 1.7) * 0.5 + 0.5)
+                   + 0.08 * (sin(d1 * 47.0 + 0.6) * 0.5 + 0.5);
+        m *= fine;
+
+        // gathers at the lip, blows out into spray in the plunge basin
+        m *= smoothstep(1.00, 0.94, y);
+        float basin = 1.0 - smoothstep(0.0, 0.32, y);
+        m *= mix(1.0, 0.38, basin);
+
+        // the outer edges of the sheet feather rather than cut off square
+        m *= smoothstep(0.015, 0.085, x) * smoothstep(0.985, 0.915, x);
+
+        // where it lands: a burst of white that spills wider than the strands
+        float burst = pow(1.0 - smoothstep(0.0, 0.24, y), 1.7)
+                    * smoothstep(0.10, 0.30, x) * smoothstep(0.90, 0.70, x)
+                    * (0.72 + 0.28 * sin(x * 23.0 - t * 3.1));
+
+        float a = clamp(m, 0.0, 1.0) * 0.88 + burst * 0.42;
+        if (a < 0.004) discard;
+
+        vec3 col = mix(paper, vec3(1.0), clamp(m * 1.15 + burst * 0.7, 0.0, 1.0));
+        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+        #include <fog_fragment>
+      }`,
+  })
+);
+falls.position.set(riverX(fallMid), (FALL_H + 1.5) / 2 - 0.4, FALL_BOT + 0.6);
+falls.renderOrder = 2;   // transparents sort by object centre; the river's is much nearer
+scene.add(falls);
 
 /* ══════════════════════════════════════════════════════════════
    竹 · BAMBOO — instanced segments, node rings, leaves
@@ -440,6 +531,29 @@ for (const side of [-1, 1]) {
   for (let i = 0; i < 5; i++) {
     const z = 16 - rnd() * 18;
     addStalk(riverX(z) + side * (13 + rnd() * 9), z, 13 + rnd() * 9, 0.18 + rnd() * 0.09);
+  }
+}
+
+/* The gorge walls: tall culms crowding both edges of the frame and running
+   straight out of the top of it. This is what makes the shot feel enclosed.
+   These sit on the bank by construction, so they skip the channel test that
+   would otherwise reject them wherever the near bank runs low. */
+for (const side of [-1, 1]) {
+  for (let i = 0; i < 7; i++) {
+    const z = 50 - rnd() * 30;
+    const x = riverX(z) + side * (13 + rnd() * 12);
+    stalks.push({
+      x, z,
+      base: Math.max(terrainHeight(x, z), 0.6) - 0.4,
+      h: 30 + rnd() * 22,
+      r: 0.30 + rnd() * 0.20,
+      segs: 8 + Math.floor(rnd() * 5),
+      lean: (rnd() - 0.5) * 0.16,
+      dir:  rnd() * Math.PI * 2,
+      ph:   rnd() * Math.PI * 2,
+      sp:   0.42 + rnd() * 0.45,
+      amp:  0.020 + rnd() * 0.032,
+    });
   }
 }
 
@@ -609,6 +723,73 @@ buildMesh(leafGeo,   inkMat('#2b3a28', '#576d4a'), leafD);
 console.log(`竹 ${stalks.length} culms · ${branchD.length} branches · ${leafD.length} leaves`);
 
 /* ══════════════════════════════════════════════════════════════
+   石 · ROCKS — wet boulders in the plunge basin and down the stream
+   ══════════════════════════════════════════════════════════════ */
+{
+  const rockGeo = new THREE.IcosahedronGeometry(1, 1);
+  const rp = rockGeo.attributes.position;
+  for (let i = 0; i < rp.count; i++) {          // knock the facets out of true
+    const s = 0.78 + vnoise(rp.getX(i) * 2.4 + 9, rp.getZ(i) * 2.4 + 5) * 0.44;
+    rp.setXYZ(i, rp.getX(i) * s, rp.getY(i) * s, rp.getZ(i) * s);
+  }
+  rockGeo.computeVertexNormals();
+
+  const rockMat = new THREE.ShaderMaterial({
+    fog: true,
+    uniforms: {
+      dark:  { value: new THREE.Color('#20303a') },
+      light: { value: new THREE.Color('#6b8290') },
+      fogColor:   { value: scene.fog.color },
+      fogDensity: { value: scene.fog.density },
+    },
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      varying vec3 vN;
+      varying float vY;
+      void main() {
+        vN = normalize(normalMatrix * normal);
+        vY = position.y;
+        #include <begin_vertex>
+        #include <project_vertex>
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform vec3 dark, light;
+      varying vec3 vN;
+      varying float vY;
+      void main() {
+        float lam = clamp(dot(normalize(vN), normalize(vec3(0.3, 1.0, 0.35))), 0.0, 1.0);
+        vec3 col = mix(dark, light, pow(lam, 1.4));
+        col = mix(col * 0.72, col, smoothstep(-0.65, 0.25, vY));  // wet at the waterline
+        gl_FragColor = vec4(col, 1.0);
+        #include <fog_fragment>
+      }`,
+  });
+
+  const rocks = new THREE.InstancedMesh(rockGeo, rockMat, 46);
+  const RM = new THREE.Matrix4(), RQ = new THREE.Quaternion(),
+        RE = new THREE.Euler(), RP = new THREE.Vector3(), RS = new THREE.Vector3();
+  let ri2 = 0;
+  for (let i = 0; i < 46; i++) {
+    // clustered at the foot of the falls, thinning downstream toward the eye
+    const z = FALL_BOT + 2 + Math.pow(rnd(), 0.7) * 74;
+    const x = riverX(z) + (rnd() - 0.5) * 17;
+    const s = 0.5 + Math.pow(rnd(), 1.7) * 2.4;
+    RP.set(x, 0.30 - s * (0.30 + rnd() * 0.30), z);
+    RE.set(rnd() * 0.5, rnd() * Math.PI * 2, rnd() * 0.5);
+    RQ.setFromEuler(RE);
+    RS.set(s * (1 + rnd() * 0.5), s * (0.55 + rnd() * 0.35), s * (1 + rnd() * 0.5));
+    rocks.setMatrixAt(ri2++, RM.compose(RP, RQ, RS));
+  }
+  rocks.count = ri2;
+  rocks.frustumCulled = false;
+  scene.add(rocks);
+}
+
+/* ══════════════════════════════════════════════════════════════
    雲海 · MIST — the white that separates one range from the next
    ══════════════════════════════════════════════════════════════ */
 function mistTexture() {
@@ -654,19 +835,21 @@ for (let i = 0; i < 14; i++) {
   sp.userData = { sp: 0, ph: rnd() * Math.PI * 2, y: sp.position.y };
   mists.push(sp); scene.add(sp);
 }
-for (let i = 0; i < 5; i++) {
+/* a low veil at the foot only — glow across the cliff itself would bleach the
+   rock that the water needs to read against */
+for (let i = 0; i < 4; i++) {
   const gl = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    blending: THREE.AdditiveBlending, opacity: 0.16 + rnd() * 0.14,
+    blending: THREE.AdditiveBlending, opacity: 0.07 + rnd() * 0.07,
     color: new THREE.Color('#dbeaf2'),
   }));
   gl.position.set(
-    riverX((FALL_TOP + FALL_BOT) / 2) + (rnd() - 0.5) * 12,
-    FALL_H * (0.25 + rnd() * 0.5),
-    (FALL_TOP + FALL_BOT) / 2 + (rnd() - 0.5) * 8
+    riverX(FALL_BOT) + (rnd() - 0.5) * 14,
+    0.8 + rnd() * 2.6,
+    FALL_BOT + 1 + rnd() * 5
   );
-  const s = 16 + rnd() * 16;
-  gl.scale.set(s, s * 0.85, 1);
+  const s = 12 + rnd() * 12;
+  gl.scale.set(s, s * 0.55, 1);
   gl.userData = { sp: 0, ph: rnd() * Math.PI * 2, y: gl.position.y };
   mists.push(gl); scene.add(gl);
 }
@@ -713,7 +896,7 @@ addEventListener('resize', () => {
 });
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(-2, 3.0, -46);
+const look = new THREE.Vector3(-4, 9.0, -54);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -721,13 +904,14 @@ function frame() {
   ptr.x += (aim.x - ptr.x) * 0.035;
   ptr.y += (aim.y - ptr.y) * 0.035;
 
-  // the eye sits over the stream itself, looking straight up the valley
-  camera.position.x = 2.5 + ptr.x * 4.5 + Math.sin(t * 0.10) * 1.4;
-  camera.position.y = 19 - ptr.y * 3.0 + Math.sin(t * 0.14) * 0.4;
-  camera.position.z = 46 + Math.cos(t * 0.08) * 1.2;
+  // stood well back, so the whole fall and the cliff it comes over are in frame
+  camera.position.x = 0.5 + ptr.x * 5.0 + Math.sin(t * 0.10) * 1.5;
+  camera.position.y = 21 - ptr.y * 3.5 + Math.sin(t * 0.14) * 0.45;
+  camera.position.z = 54 + Math.cos(t * 0.08) * 1.4;
   camera.lookAt(look);
 
   water.material.uniforms.uTime.value = t;
+  falls.material.uniforms.uTime.value = t;
   for (const m of inkMats) m.uniforms.uTime.value = t;
 
   for (const m of mists) {
