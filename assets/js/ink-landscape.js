@@ -963,9 +963,12 @@ for (let i = 0; i < 14; i++) {
   }));
   // Biased off to one side and high: dead centre is where a portrait or a
   // headline sits, and a bird behind either is a bird nobody sees.
-  const z = -62 - rnd() * 80;
+  // Over the notch of sky above the fall: high enough to clear the ridgeline,
+  // low enough to stay inside a frame that is only tilted 7° upward, and near
+  // the valley axis where there is open sky rather than mountain behind them.
+  const z = -50 - rnd() * 45;
   const side = rnd() < 0.5 ? -1 : 1;
-  sp.position.set(FALL_CX + side * (14 + rnd() * 30), 30 + rnd() * 18, z);
+  sp.position.set(FALL_CX + side * (5 + rnd() * 22), 40 + rnd() * 14, z);
   const s = 2.6 + rnd() * 2.6;
   sp.scale.set(s, s, 1);
   sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y };
@@ -1020,7 +1023,7 @@ const io = 'IntersectionObserver' in window
 if (io) io.observe(canvas);
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(FALL_CX + panX, 8.5, FALL_BOT - 4);
+const look = new THREE.Vector3(FALL_CX + panX, 19, FALL_BOT - 4);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -1036,8 +1039,10 @@ function frame() {
     controls.update();
   } else {
     // stood well back, so the whole fall and the cliff it comes over are in frame
+    // Low and looking up: it puts the sky above the gorge in frame, which is
+    // the only ground the birds have to read against.
     camera.position.x = FALL_CX + panX + 2.5 + ptr.x * 4.0 + Math.sin(t * 0.10) * 1.3;
-    camera.position.y = 15 - ptr.y * 2.6 + Math.sin(t * 0.14) * 0.38;
+    camera.position.y = 7.5 - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35;
     camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
     camera.lookAt(look);
   }
