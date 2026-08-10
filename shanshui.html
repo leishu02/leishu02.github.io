@@ -100,10 +100,18 @@ function terrainHeight(x, z) {
   // lip — not on the meander line, which has already wandered off by the time
   // the water lands. Without this the channel pinched in from one side and the
   // pool came out narrower than the curtain feeding it.
-  const basin = sstep(34, 2, Math.abs(z - (FALL_BOT + 9)));
+  // Monotone on each side of the foot. A symmetric bump here widened the
+  // channel and then closed it again while the centreline was still sliding
+  // back to the meander, which folded the bank into a hook.
+  // Monotone on each side of the foot, and slow to let go: the basin has to
+  // ease into the ordinary channel over most of the reach, or the bank closes
+  // in on the eye like a funnel. A symmetric bump also folded it into a hook,
+  // widening and re-closing while the centreline was still sliding back.
+  const ds = z - FALL_BOT;                          // >0 is downstream
+  const basin = ds < 0 ? sstep(-12, 0, ds) : 1 - sstep(0, 90, ds);
   const cx = riverX(z) + (LIP_CX - riverX(z)) * basin;
   const d = Math.abs(x - cx);
-  const inner = 6 + 7 * basin;
+  const inner = 8 + 6 * basin;
   const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
@@ -303,6 +311,23 @@ const water = new THREE.Mesh(
         churn *= 0.52 + 0.48 * (0.5 + 0.5 * sin(p.x * 2.3 + p.y * 1.9 + t * 2.4))
                       * (0.5 + 0.5 * sin(p.x * 5.1 - p.y * 3.3 - t * 3.1));
         col = mix(col, vec3(1.0), clamp(churn, 0.0, 1.0) * 0.60);
+
+        // Shallows. The same channel the terrain is carved from, so the water
+        // pales exactly where it runs thin over the bank instead of meeting it
+        // as a flat cut. This is what stops the reach reading as a slab.
+        float rx  = sin(p.y * 0.015) * 4.5 + sin(p.y * 0.0055) * 3.0;
+        float bas = ds < 0.0 ? smoothstep(-12.0, 0.0, ds)
+                             : 1.0 - smoothstep(0.0, 90.0, ds);
+        float cxr = mix(rx, fallCx, bas);
+        float dw  = abs(p.x - cxr);
+        float hw  = 8.0 + 6.0 * bas + 3.5;        // where the wet edge falls
+        float shallow = smoothstep(hw - 8.0, hw, dw);
+        col = mix(col, paper, shallow * 0.62);
+
+        // and a thread of light where the current parts around the margin
+        col = mix(col, vec3(1.0),
+                  smoothstep(0.55, 0.95, shallow) * (1.0 - smoothstep(0.95, 1.0, shallow))
+                  * (0.45 + 0.55 * (0.5 + 0.5 * sin(p.y * 0.7 + r * 2.0))) * 0.30);
 
         gl_FragColor = vec4(col, 0.94);
         #include <fog_fragment>
