@@ -8,6 +8,7 @@
     --g-red:    #ea4335;
     --g-yellow: #fbbc05;
     --g-green:  #34a853;
+    --ink-green: #2f4a35;  /* the bamboo's own green, dark enough to read as ink */
 
     --text:      #202124;  /* grey 900 */
     --text-2:    #5f6368;  /* grey 700 */
@@ -62,10 +63,10 @@ a:hover { text-decoration: underline; }
     white-space: nowrap;
 }
 .brand:hover { text-decoration: none; }
-.brand .dot-b { color: var(--g-blue); }
-.brand .dot-r { color: var(--g-red); }
-.brand .dot-y { color: var(--g-yellow); }
-.brand .dot-g { color: var(--g-green); }
+/* One ink green for 舒蕾, picked off the bamboo in the hero scene rather than
+   from the Google palette — the two characters are a name, not a logotype, and
+   colouring them separately broke them into unrelated marks. */
+.brand .brand-cn { color: var(--ink-green); }
 
 .nav {
     display: flex;
