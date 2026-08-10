@@ -653,7 +653,14 @@ const stalks = [];
 let rs = 20240616;
 const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 4294967296; };
 
+/* Nothing may stand in the corridor the camera looks down. Panning the aim
+   sideways used to walk the sight line straight into the right-bank grove; the
+   grove yields instead, so the framing is free to move. */
+const sightX = FALL_CX + panX;
+const blocksView = (x, z) => z < 36 && z > -24 && Math.abs(x - sightX) < 7.5;
+
 function addStalk(x, z, h, r) {
+  if (blocksView(x, z)) return;
   const ground = terrainHeight(x, z);
   // bamboo grows on the bank, never in the stream — clear of both the local
   // waterline (which steps up above the falls) and the channel itself
@@ -686,36 +693,17 @@ for (let c = 0; c < 34; c++) {
   }
 }
 
-/* A light screen of nearer culms on each bank — enough to frame, not to block */
+/* A light screen on each bank, set back far enough to stay scenery */
 for (const side of [-1, 1]) {
-  for (let i = 0; i < 5; i++) {
-    const z = 16 - rnd() * 18;
+  for (let i = 0; i < 6; i++) {
+    const z = -6 - rnd() * 22;
     addStalk(riverX(z) + side * (13 + rnd() * 9), z, 13 + rnd() * 9, 0.18 + rnd() * 0.09);
   }
 }
 
-/* The gorge walls: tall culms crowding both edges of the frame and running
-   straight out of the top of it. This is what makes the shot feel enclosed.
-   These sit on the bank by construction, so they skip the channel test that
-   would otherwise reject them wherever the near bank runs low. */
-for (const side of [-1, 1]) {
-  for (let i = 0; i < 7; i++) {
-    const z = 26 - rnd() * 30;              // kept back, clear of the lens
-    const x = riverX(z) + side * (14 + rnd() * 12);
-    stalks.push({
-      x, z,
-      base: Math.max(terrainHeight(x, z), 0.6) - 0.4,
-      h: 30 + rnd() * 22,
-      r: 0.30 + rnd() * 0.20,
-      segs: 8 + Math.floor(rnd() * 5),
-      lean: (rnd() - 0.5) * 0.16,
-      dir:  rnd() * Math.PI * 2,
-      ph:   rnd() * Math.PI * 2,
-      sp:   0.42 + rnd() * 0.45,
-      amp:  0.020 + rnd() * 0.032,
-    });
-  }
-}
+/* No gorge-wall culms. Standing that close they read as dark slabs across the
+   frame rather than as bamboo, and they were the one thing fighting the fall
+   for the eye. The receding groves carry the setting on their own. */
 
 /* Pre-roll the foliage so it doesn't shimmer between frames.
    Bamboo carries nothing on the lower culm, then throws thin side branches

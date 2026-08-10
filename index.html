@@ -208,7 +208,7 @@
         if (canvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
             try {
                 // Aim right of the falls so it clears the centred text column
-                mountInkLandscape({ canvas, interactive: false, panX: 9 });
+                mountInkLandscape({ canvas, interactive: false, panX: 17 });
                 document.querySelector('.hero').classList.add('hero-live');
             } catch (e) {
                 console.warn('hero scene unavailable:', e);
