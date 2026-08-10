@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>山水 · Three.js Ink Landscape</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #eef2f2; }
+  canvas { display: block; }
+
+  /* rice-paper grain, very faint */
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 2;
+    opacity: .30; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/><feColorMatrix type='saturate' values='0'/></filter><rect width='180' height='180' filter='url(%23n)' opacity='0.35'/></svg>");
+  }
+
+  /* seal + title, classic scroll placement */
+  .mark {
+    position: fixed; z-index: 3; pointer-events: none;
+    left: 46px; top: 42px;
+    font: 300 13px/1.9 "Songti SC", "STSong", "SimSun", Georgia, serif;
+    color: rgba(38, 58, 70, .52);
+    letter-spacing: .42em;
+    writing-mode: vertical-rl;
+  }
+  .seal {
+    position: fixed; z-index: 3; pointer-events: none;
+    left: 44px; top: 190px;
+    width: 30px; height: 30px;
+    background: #9e3b30;
+    display: grid; place-items: center;
+    font: 600 13px/1 "Songti SC", "STSong", serif;
+    color: #f4ece2; letter-spacing: 0;
+    opacity: .82;
+  }
+  .hint {
+    position: fixed; z-index: 3; pointer-events: none;
+    bottom: 26px; right: 34px;
+    font: 300 11px/1 "Songti SC", Georgia, serif;
+    color: rgba(38, 58, 70, .34);
+    letter-spacing: .3em;
+  }
+  @media (max-width: 640px) {
+    .mark { left: 22px; top: 26px; font-size: 12px; }
+    .seal { left: 21px; top: 158px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="mark">竹 溪 遠 岫</div>
+<div class="seal">舒</div>
+<div class="hint">移 動 光 標</div>
+<div class="grain"></div>
+
+<script type="importmap">
+{ "imports": { "three": "./assets/js/three.module.min.js" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+
+/* ══════════════════════════════════════════════════════════════
+   宣纸 · palette — every colour derived from ink diluted on paper
+   ══════════════════════════════════════════════════════════════ */
+const PAPER      = new THREE.Color('#eef2f2');
+const INK_NEAR   = new THREE.Color('#2b4150');
+const INK_MID    = new THREE.Color('#5c7d8e');
+const WATER_INK  = new THREE.Color('#7fa4ba');
+
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ── renderer ───────────────────────────────────────────────── */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(PAPER, 1);
+document.body.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+scene.fog    = new THREE.FogExp2(PAPER.getHex(), 0.0092);
+
+const camera = new THREE.PerspectiveCamera(46, innerWidth / innerHeight, 0.1, 700);
+camera.position.set(0, 5.2, 34);
+
+/* ── noise: value fbm + ridged multifractal ─────────────────── */
+const hash = (x, y) => { const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123; return n - Math.floor(n); };
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+}
+function ridged(x, y, oct = 5) {
+  let sum = 0, amp = 0.5, f = 1, norm = 0;
+  for (let i = 0; i < oct; i++) {
+    let n = vnoise(x * f, y * f) * 2 - 1;
+    n = 1 - Math.abs(n); n *= n;
+    sum += n * amp; norm += amp;
+    amp *= 0.5; f *= 2.03;
+  }
+  return sum / norm;
+}
+const sstep = (e0, e1, x) => { const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1); return t * t * (3 - 2 * t); };
+
+/* the river meanders — terrain is carved around this centreline */
+const riverX = z => Math.sin(z * 0.021) * 7.5 + Math.sin(z * 0.0067) * 5.0;
+
+function terrainHeight(x, z) {
+  const d = Math.abs(x - riverX(z));
+  const valley = sstep(5, 21, d);                  // 0 in the water, 1 in the hills
+  const far    = 0.16 + 1.85 * sstep(10, -190, z); // ranges grow with distance
+  let h = ridged(x * 0.0115, z * 0.0115, 5);
+  h = Math.pow(h, 1.45) * 30 * valley * far;
+  h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
+  return h;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   TERRAIN — real displaced geometry, shaded as ink wash
+   ══════════════════════════════════════════════════════════════ */
+const TW = 420, TD = 460, SEG = 300;
+const tGeo = new THREE.PlaneGeometry(TW, TD, SEG, SEG);
+{
+  const p = tGeo.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i);     // plane lies in XY, we displace +Z
+    p.setZ(i, terrainHeight(x, -y - 90));   // shift so the valley runs away from camera
+  }
+  tGeo.computeVertexNormals();
+}
+
+const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
+  fog: true,
+  uniforms: {
+    paper:   { value: PAPER },
+    inkNear: { value: INK_NEAR },
+    inkMid:  { value: INK_MID },
+    fogColor:{ value: scene.fog.color },
+    fogDensity: { value: scene.fog.density },
+  },
+  vertexShader: /* glsl */`
+    #include <common>
+    #include <fog_pars_vertex>
+    varying float vH;      // height above the water
+    varying float vSlope;  // 1 = flat, 0 = sheer
+    void main() {
+      vH = position.z;
+      vSlope = normal.z;
+      #include <begin_vertex>
+      #include <project_vertex>
+      #include <fog_vertex>
+    }`,
+  fragmentShader: /* glsl */`
+    #include <common>
+    #include <fog_pars_fragment>
+    uniform vec3 paper, inkNear, inkMid;
+    varying float vH;
+    varying float vSlope;
+    void main() {
+      float h     = clamp(vH / 30.0, 0.0, 1.0);
+      float cliff = clamp(1.0 - vSlope, 0.0, 1.0);
+
+      // pigment settles on steep faces; the foot of every hill dissolves in mist
+      float ink = smoothstep(0.015, 0.30, h);
+      ink *= 0.30 + 1.05 * cliff;
+      ink += 0.34 * smoothstep(0.55, 0.95, h) * cliff;   // ridge accents
+      ink = clamp(ink, 0.0, 1.0);
+
+      vec3 col = mix(paper, mix(inkMid, inkNear, ink), ink);
+      gl_FragColor = vec4(col, 1.0);
+      #include <fog_fragment>
+    }`,
+}));
+terrain.rotation.x = -Math.PI / 2;
+scene.add(terrain);
+
+/* ══════════════════════════════════════════════════════════════
+   WATER — rippling plane, sky-pale at grazing angles
+   ══════════════════════════════════════════════════════════════ */
+const water = new THREE.Mesh(
+  new THREE.PlaneGeometry(300, 460, 220, 220),
+  new THREE.ShaderMaterial({
+    fog: true, transparent: true,
+    uniforms: {
+      uTime:   { value: 0 },
+      water:   { value: WATER_INK },
+      paper:   { value: PAPER },
+      fogColor:{ value: scene.fog.color },
+      fogDensity: { value: scene.fog.density },
+    },
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform float uTime;
+      varying float vRipple;
+      varying vec3  vView;
+      varying vec3  vWorld;
+      void main() {
+        vec3 pos = position;
+        float r =
+            sin(pos.x * 0.38 + uTime * 0.85) * 0.055
+          + sin(pos.y * 0.27 - uTime * 0.62) * 0.048
+          + sin((pos.x + pos.y) * 0.15 + uTime * 0.40) * 0.070;
+        pos.z += r;
+        vRipple = r;
+        vWorld  = (modelMatrix * vec4(pos, 1.0)).xyz;
+        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+        vView   = -mvPosition.xyz;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform vec3 water, paper;
+      uniform float uTime;
+      varying float vRipple;
+      varying vec3  vView;
+      varying vec3  vWorld;
+      void main() {
+        // grazing angles catch a little sky, but the river keeps its ink
+        float fres = pow(1.0 - abs(normalize(vView).y), 2.6);
+        vec3 col = mix(water, paper, 0.10 + 0.44 * fres);
+
+        // horizontal strokes — water is drawn, not simulated, on a scroll
+        float band = sin(vWorld.z * 0.85 + sin(vWorld.x * 0.22) * 1.7 + uTime * 0.30);
+        col = mix(col, water * 0.62, smoothstep(0.80, 0.99, band) * 0.42);
+
+        // silver where the ripple crests
+        col = mix(col, vec3(1.0), smoothstep(0.050, 0.108, vRipple) * 0.34);
+
+        gl_FragColor = vec4(col, 0.94);
+        #include <fog_fragment>
+      }`,
+  })
+);
+water.rotation.x = -Math.PI / 2;
+water.position.y = 0.28;
+scene.add(water);
+
+/* ══════════════════════════════════════════════════════════════
+   竹 · BAMBOO — instanced segments, node rings, leaves
+   ══════════════════════════════════════════════════════════════ */
+function leafGeometry() {
+  const S = 4, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= S; i++) {
+    const t = i / S;
+    const w = Math.sin(Math.pow(t, 0.72) * Math.PI) * 0.5 * (1 - t * 0.30);
+    const bend = -Math.pow(t, 2.1) * 0.62;
+    pos.push(-w, t, bend, w, t, bend);
+    uv.push(0, t, 1, t);
+  }
+  for (let i = 0; i < S; i++) {
+    const a = i * 2;
+    idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+/* The grove is laid out once and never touched again — the wind lives in the
+   vertex shader, so no matrices are rebuilt on the CPU per frame. */
+const inkMats = [];
+const inkMat = (dark, light, opts = {}) => {
+  const m = new THREE.ShaderMaterial({
+    fog: true, side: THREE.DoubleSide, ...opts,
+    uniforms: {
+      uTime: { value: 0 },
+      dark: { value: new THREE.Color(dark) },
+      light:{ value: new THREE.Color(light) },
+      fogColor:  { value: scene.fog.color },
+      fogDensity:{ value: scene.fog.density },
+    },
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform float uTime;
+      attribute vec3 aSwayVec;   // full displacement at peak sway
+      attribute vec2 aSwayT;     // (speed, phase)
+      varying vec2 vUv;
+      varying vec3 vN;
+      void main() {
+        vUv = uv;
+        vN  = normalize(normalMatrix * normalize(mat3(instanceMatrix) * normal));
+
+        vec4 world = modelMatrix * instanceMatrix * vec4(position, 1.0);
+        world.xyz += aSwayVec * sin(uTime * aSwayT.x + aSwayT.y);
+
+        vec4 mvPosition = viewMatrix * world;
+        gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+  fragmentShader: /* glsl */`
+    #include <common>
+    #include <fog_pars_fragment>
+    uniform vec3 dark, light;
+    varying vec2 vUv;
+    varying vec3 vN;
+    void main() {
+      // light falls from the upper right, as in every scroll ever painted
+      float lam = clamp(dot(normalize(vN), normalize(vec3(0.62, 0.72, 0.32))), 0.0, 1.0);
+      vec3 col = mix(dark, light, pow(lam, 0.85));
+      col = mix(col, dark, vUv.y * 0.22);   // tip darkens slightly
+      gl_FragColor = vec4(col, 1.0);
+      #include <fog_fragment>
+    }`,
+  });
+  inkMats.push(m);
+  return m;
+};
+
+const stalkGeo  = new THREE.CylinderGeometry(0.92, 1.0, 1, 9, 1, true);
+stalkGeo.translate(0, 0.5, 0);
+const branchGeo = stalkGeo.clone();
+const ringGeo   = new THREE.CylinderGeometry(1.16, 1.16, 1, 9, 1);
+const leafGeo   = leafGeometry();
+
+/* build the grove — clusters hugging both banks, biggest nearest the eye */
+const stalks = [];
+let rs = 20240616;
+const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 4294967296; };
+
+function addStalk(x, z, h, r) {
+  const ground = terrainHeight(x, z);
+  if (ground < 0.55) return;          // nothing grows mid-river
+  stalks.push({
+    x, z,
+    base: ground - 0.4,
+    h, r,
+    segs: 6 + Math.floor(rnd() * 5),
+    lean: (rnd() - 0.5) * 0.22,
+    dir:  rnd() * Math.PI * 2,
+    ph:   rnd() * Math.PI * 2,
+    sp:   0.50 + rnd() * 0.60,
+    amp:  0.028 + rnd() * 0.050,
+  });
+}
+
+/* groves receding up both banks */
+for (let c = 0; c < 30; c++) {
+  const z    = 22 - Math.pow(rnd(), 0.58) * 145;
+  const side = rnd() < 0.5 ? -1 : 1;
+  const cx   = riverX(z) + side * (11 + rnd() * 22);
+  const n    = 3 + Math.floor(rnd() * 4);
+  for (let i = 0; i < n; i++) {
+    const x  = cx + (rnd() - 0.5) * 6;
+    const zz = z + (rnd() - 0.5) * 6;
+    addStalk(x, zz, 10 + rnd() * 11, 0.17 + rnd() * 0.11);
+  }
+}
+
+/* Mass on the left bank, void on the right — the oldest composition there is.
+   These are the only stalks close enough to actually fill the frame edge. */
+for (let i = 0; i < 22; i++) {
+  const z = 24 - rnd() * 20;
+  addStalk(riverX(z) - (6 + rnd() * 9), z, 13 + rnd() * 10, 0.20 + rnd() * 0.12);
+}
+for (let i = 0; i < 20; i++) {
+  const z = 14 - rnd() * 24;
+  addStalk(riverX(z) + (10 + rnd() * 11), z, 15 + rnd() * 11, 0.18 + rnd() * 0.11);
+}
+
+/* Pre-roll the foliage so it doesn't shimmer between frames.
+   Bamboo carries nothing on the lower culm, then throws thin side branches
+   that each end in a small drooping spray — that silhouette is the whole plant. */
+const branchPlan = [], leafPlan = [];
+for (let s = 0; s < stalks.length; s++) {
+  const st = stalks[s];
+  // foliage detail follows the eye: near culms get full sprays, far ones a hint
+  const near = sstep(-130, 20, st.z);
+
+  for (let seg = 0; seg < st.segs; seg++) {
+    const f = (seg + 1) / st.segs;
+    if (f < 0.45) continue;                     // the crown sits high and airy
+
+    const nb = 2 + Math.floor(rnd() * 2 + near * 2);
+    for (let b = 0; b < nb; b++) {
+      const bi = branchPlan.length;
+      const bLen = st.h * (0.06 + rnd() * 0.09);
+      branchPlan.push({
+        s, f: f + (rnd() - 0.5) * 0.08,
+        yaw:   rnd() * Math.PI * 2,
+        len:   bLen,
+        droop: 0.16 + rnd() * 0.34,             // branches bow under their leaves
+        rad:   st.r * 0.09,
+        ph:    rnd() * Math.PI * 2,
+      });
+
+      const nl = 5 + Math.floor(rnd() * 2 + near * 4);
+      for (let l = 0; l < nl; l++) {
+        const len = bLen * (1.0 + rnd() * 0.85);
+        leafPlan.push({
+          b: bi,
+          // leaves spray ALONG the twig, not in a pom-pom at its tip
+          along:  0.34 + (l / Math.max(1, nl - 1)) * 0.66 + (rnd() - 0.5) * 0.12,
+          spread: (l % 2 ? 1 : -1) * (0.55 + rnd() * 0.55),
+          pitch:  1.30 + rnd() * 0.55,          // long blades, hanging
+          len,
+          wid:    len * (0.085 + rnd() * 0.04), // a bamboo leaf is ~10× longer than wide
+          ph:     rnd() * Math.PI * 2,
+        });
+      }
+    }
+  }
+}
+
+const M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler();
+const P = new THREE.Vector3(), S3 = new THREE.Vector3();
+const ORIGIN = new THREE.Vector3(), DIR = new THREE.Vector3(), TIP = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
+
+const segD = [], ringD = [], branchD = [], leafD = [];
+const push = (arr, mat, sx, sy, sz, speed, phase) =>
+  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase] });
+
+/* culms and their node rings, at rest */
+for (const st of stalks) {
+  const segH = st.h / st.segs;
+  const dx = Math.cos(st.dir), dz = Math.sin(st.dir);
+
+  for (let s = 0; s < st.segs; s++) {
+    const f0 = s / st.segs, f1 = (s + 1) / st.segs;
+    // the culm curves: displacement grows with the square of the height
+    const bend0 = st.lean * f0 * f0 * st.h;
+    const bend1 = st.lean * f1 * f1 * st.h;
+    const y0 = st.base + f0 * st.h;
+    const tilt = Math.atan2(bend1 - bend0, segH);
+    const rad = st.r * (1 - f0 * 0.34);
+
+    P.set(st.x + dx * bend0, y0, st.z + dz * bend0);
+    E.set(tilt * Math.sin(st.dir), 0, -tilt * Math.cos(st.dir));
+    Q.setFromEuler(E);
+
+    const amp = reduceMotion ? 0 : st.amp * f0 * f0 * st.h;
+    S3.set(rad, segH * 1.02, rad);
+    push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
+
+    if (s > 0) {
+      S3.set(rad, st.r * 0.30, rad);
+      push(ringD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
+    }
+  }
+}
+
+/* side branches, each remembering its tip so a spray can hang off it */
+for (const br of branchPlan) {
+  const st = stalks[br.s];
+  const bend = st.lean * br.f * br.f * st.h;
+
+  ORIGIN.set(
+    st.x + Math.cos(st.dir) * bend,
+    st.base + br.f * st.h,
+    st.z + Math.sin(st.dir) * bend
+  );
+  DIR.set(Math.cos(br.yaw), -br.droop, Math.sin(br.yaw)).normalize();
+  br._org = ORIGIN.clone();
+  br._dir = DIR.clone();
+
+  const amp = reduceMotion ? 0 : st.amp * br.f * br.f * st.h;
+  br._sway = [Math.cos(st.dir) * amp, 0, Math.sin(st.dir) * amp];
+  br._t    = [st.sp, st.ph];
+
+  Q.setFromUnitVectors(UP, DIR);
+  S3.set(br.rad, br.len, br.rad);
+  push(branchD, M.compose(ORIGIN, Q, S3), ...br._sway, st.sp, st.ph);
+}
+
+for (const lf of leafPlan) {
+  const br = branchPlan[lf.b];
+  TIP.copy(br._dir).multiplyScalar(br.len * lf.along).add(br._org);
+  E.set(lf.pitch, br.yaw + lf.spread, 0, 'YXZ');
+  Q.setFromEuler(E);
+  S3.set(lf.wid, lf.len, lf.len);
+  push(leafD, M.compose(TIP, Q, S3), ...br._sway, br._t[0], br._t[1]);
+}
+
+function buildMesh(geo, mat, data) {
+  const n = data.length;
+  const mesh = new THREE.InstancedMesh(geo, mat, n);
+  const sway = new Float32Array(n * 3);
+  const time = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) {
+    mesh.setMatrixAt(i, data[i].m);
+    sway.set(data[i].s, i * 3);
+    time.set(data[i].t, i * 2);
+  }
+  geo.setAttribute('aSwayVec', new THREE.InstancedBufferAttribute(sway, 3));
+  geo.setAttribute('aSwayT',   new THREE.InstancedBufferAttribute(time, 2));
+  mesh.frustumCulled = false;
+  scene.add(mesh);
+  return mesh;
+}
+
+buildMesh(stalkGeo,  inkMat('#1e2f26', '#4d6549'), segD);
+buildMesh(ringGeo,   inkMat('#1a2619', '#33452c'), ringD);
+buildMesh(branchGeo, inkMat('#1b2a1c', '#3a5033'), branchD);
+buildMesh(leafGeo,   inkMat('#2b3a28', '#576d4a'), leafD);
+console.log(`竹 ${stalks.length} culms · ${branchD.length} branches · ${leafD.length} leaves`);
+
+/* ══════════════════════════════════════════════════════════════
+   雲海 · MIST — the white that separates one range from the next
+   ══════════════════════════════════════════════════════════════ */
+function mistTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  rg.addColorStop(0,   'rgba(255,255,255,0.92)');
+  rg.addColorStop(0.42,'rgba(255,255,255,0.44)');
+  rg.addColorStop(1,   'rgba(255,255,255,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, 256, 256);
+  return new THREE.CanvasTexture(c);
+}
+const mistTex = mistTexture();
+const mists = [];
+for (let i = 0; i < 30; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: mistTex, transparent: true, depthWrite: false,
+    opacity: 0.16 + rnd() * 0.26, color: PAPER,
+  }));
+  const z = 12 - rnd() * 190;
+  sp.position.set((rnd() - 0.5) * 210, 1.4 + rnd() * 17, z);
+  const s = 34 + rnd() * 82;
+  sp.scale.set(s, s * (0.24 + rnd() * 0.18), 1);
+  sp.userData = { sp: 0.10 + rnd() * 0.26, ph: rnd() * Math.PI * 2, y: sp.position.y };
+  mists.push(sp); scene.add(sp);
+}
+
+/* 飛鳥 — two strokes of the brush, nothing more */
+function birdTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const g = c.getContext('2d');
+  g.strokeStyle = 'rgba(30,48,60,0.85)';
+  g.lineWidth = 3; g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(6, 34); g.quadraticCurveTo(20, 20, 32, 30);
+  g.quadraticCurveTo(44, 20, 58, 34);
+  g.stroke();
+  return new THREE.CanvasTexture(c);
+}
+const birdTex = birdTexture();
+const birds = [];
+for (let i = 0; i < 7; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: birdTex, transparent: true, depthWrite: false, opacity: 0.34 + rnd() * 0.22,
+  }));
+  sp.position.set((rnd() - 0.5) * 130, 20 + rnd() * 20, -30 - rnd() * 120);
+  const s = 1.5 + rnd() * 1.7;
+  sp.scale.set(s, s, 1);
+  sp.userData = { sp: 0.9 + rnd() * 1.1, ph: rnd() * Math.PI * 2, y: sp.position.y };
+  birds.push(sp); scene.add(sp);
+}
+
+/* ── input ──────────────────────────────────────────────────── */
+const ptr = { x: 0, y: 0 }, aim = { x: 0, y: 0 };
+addEventListener('pointermove', e => {
+  aim.x = (e.clientX / innerWidth) * 2 - 1;
+  aim.y = (e.clientY / innerHeight) * 2 - 1;
+});
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ── loop ───────────────────────────────────────────────────── */
+const look = new THREE.Vector3(0, 7, -70);
+const clock = new THREE.Clock();
+
+function frame() {
+  const t = clock.getElapsedTime();
+  ptr.x += (aim.x - ptr.x) * 0.035;
+  ptr.y += (aim.y - ptr.y) * 0.035;
+
+  camera.position.x = ptr.x * 5.5 + Math.sin(t * 0.10) * 1.6;
+  camera.position.y = 5.4 - ptr.y * 1.9 + Math.sin(t * 0.14) * 0.35;
+  camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
+  camera.lookAt(look);
+
+  water.material.uniforms.uTime.value = t;
+  for (const m of inkMats) m.uniforms.uTime.value = t;
+
+  for (const m of mists) {
+    m.position.x += m.userData.sp * 0.016;
+    if (m.position.x > 118) m.position.x = -118;
+    m.position.y = m.userData.y + Math.sin(t * 0.22 + m.userData.ph) * 0.7;
+  }
+  for (const b of birds) {
+    b.position.x += b.userData.sp * 0.030;
+    if (b.position.x > 78) b.position.x = -78;
+    b.position.y = b.userData.y + Math.sin(t * 0.55 + b.userData.ph) * 1.3;
+  }
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+frame();
+</script>
+</body>
+</html>
