@@ -62,8 +62,11 @@ a:hover { text-decoration: underline; }
     font-weight: 500;
     color: var(--text);
     letter-spacing: .2px;
-    white-space: nowrap;
 }
+/* Each half stays whole; only the space between them may break, so 舒蕾 can
+   never be split across lines the way a blanket nowrap was there to prevent. */
+.brand .brand-en,
+.brand .brand-cn { white-space: nowrap; }
 .brand:hover { text-decoration: none; }
 /* One ink green for 舒蕾, picked off the bamboo in the hero scene rather than
    from the Google palette — the two characters are a name, not a logotype, and
@@ -261,8 +264,15 @@ footer {
 
 /* ---------- Responsive ---------- */
 @media (max-width: 720px) {
-    .appbar-inner { padding: 0 14px; height: 56px; }
-    .nav a { padding: 7px 10px; }
+    /* Height has to give here: a two-line name and a wrapping nav together
+       overflow a fixed bar, and the two end up printed over each other. */
+    .appbar-inner { padding: 8px 14px; height: auto; min-height: 56px; gap: 10px; }
+    /* Stack the name on small screens: latin on top, 舒蕾 beneath */
+    .brand { font-size: 17px; line-height: 1.22; }
+    .brand .brand-en,
+    .brand .brand-cn { display: block; }
+    .nav { justify-content: flex-end; gap: 2px; }
+    .nav a { padding: 6px 9px; font-size: 13px; }
     main { padding: 0 16px; }
     .hero { padding: 40px 16px 32px; }
     .hero h1 { font-size: 32px; }
