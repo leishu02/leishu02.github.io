@@ -125,6 +125,11 @@ function terrainHeight(x, z) {
   let h = ridged(x * 0.0115, z * 0.0115, 5);
   h = Math.pow(h, 1.45) * 30 * valley * far;
   h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
+  // A deterministic shoulder as well as the noise. Relying on noise alone
+  // leaves dips that fall under the waterline far from the channel, so the
+  // wet width becomes ragged and unmeasurable — and the curtain cannot be
+  // matched to a width that is not well defined.
+  h += valley * 3.2 * far;
   return bedAt(z) + h;
 }
 
@@ -341,6 +346,7 @@ for (let z = FALL_TOP - 7; z <= FALL_TOP + 0.5; z += 0.5) {
   lipR = Math.max(lipR, channelHalfWidth(z,  1));
 }
 const FALL_W = (lipL + lipR) * 1.04;
+const FALL_CX = riverX(FALL_TOP - 0.5) + (lipR - lipL) / 2;
 const fallMid = (FALL_TOP + FALL_BOT) / 2;
 
 /* Water leaving a lip is a projectile: it carries the river's horizontal speed
@@ -376,8 +382,19 @@ function fallsGeometry(nu, nv) {
     // flat as a river approaching the edge, swelling as it aerates on the way down
     const th = t <= 0 ? 0.42 : 0.42 + 2.3 * t;
     for (let i = 0; i <= nu; i++) {
-      const a = (i / nu) * Math.PI * 2;
-      pos.push(Math.cos(a) * w * 0.5, y, zc + Math.sin(a) * th);
+      const a  = (i / nu) * Math.PI * 2;
+      const lx = Math.cos(a) * w * 0.5;
+      let   pz = zc + Math.sin(a) * th;
+
+      // The back of the sheet would otherwise sink into the cliff partway down
+      // and be clipped by it, leaving a layer that stops in mid-air. Real water
+      // hugs the rock instead: slide any buried vertex downstream until it
+      // clears, so the back face lies against the face of the cliff.
+      for (let k = 0; k < 60 && terrainHeight(FALL_CX + lx, pz) > y - 0.1; k++) {
+        pz += 0.2;
+      }
+
+      pos.push(lx, y, pz);
       uv.push((Math.cos(a) + 1) * 0.5, (T_MAX - t) / (T_MAX - T_MIN));
     }
   }
@@ -533,7 +550,7 @@ const falls = new THREE.Mesh(
   })
 );
 // centred on the wet channel, which is not the meander line when the banks differ
-falls.position.set(riverX(FALL_TOP - 0.5) + (lipR - lipL) / 2, 0, 0);
+falls.position.set(FALL_CX, 0, 0);
 falls.renderOrder = 2;   // transparents sort by object centre; the river's is much nearer
 scene.add(falls);
 
