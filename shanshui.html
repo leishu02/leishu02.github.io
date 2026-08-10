@@ -1023,14 +1023,17 @@ function birdTexture() {
 }
 const birdTex = birdTexture();
 const birds = [];
-/* a skein of birds crossing the far valley, well above the ridgelines */
-for (let i = 0; i < 16; i++) {
+/* A skein crossing the notch of sky above the falls. Exempt from fog: at this
+   range it erased them, and a bird in an ink painting stays a clean dark mark
+   however far off it is — that is the whole convention. */
+for (let i = 0; i < 14; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: birdTex, transparent: true, depthWrite: false, opacity: 0.30 + rnd() * 0.30,
+    map: birdTex, transparent: true, depthWrite: false, fog: false,
+    opacity: 0.45 + rnd() * 0.35,
   }));
-  const z = -55 - rnd() * 110;
-  sp.position.set((rnd() - 0.5) * 120, 26 + rnd() * 26, z);
-  const s = 1.9 + rnd() * 2.4;
+  const z = -62 - rnd() * 80;
+  sp.position.set(FALL_CX + (rnd() - 0.5) * 78, 25 + rnd() * 20, z);
+  const s = 2.6 + rnd() * 2.6;
   sp.scale.set(s, s, 1);
   sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y };
   birds.push(sp); scene.add(sp);
