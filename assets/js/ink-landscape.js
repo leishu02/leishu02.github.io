@@ -1354,6 +1354,108 @@ for (let i = 0; i < 14; i++) {
   birds.push(sp); scene.add(sp);
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SPRAY — mist boiling up out of the plunge
+   A few hundred soft billows, each born on the line where the sheet meets
+   the pool. They rise, fan outward, drift downstream toward the eye and
+   swell as they thin out. Every particle's whole life is a function of its
+   seed and the clock, evaluated in the vertex shader — nothing is updated
+   on the CPU. Seeds come from their own generator so the rest of the
+   scene's layout is untouched.
+   ══════════════════════════════════════════════════════════════ */
+const SPRAY_N = lowPower ? 260 : 640;
+const spray = (() => {
+  let ss = 90210;
+  const r = () => { ss = (ss * 1664525 + 1013904223) >>> 0; return ss / 4294967296; };
+  const seed = new Float32Array(SPRAY_N * 4);
+  for (let i = 0; i < SPRAY_N; i++) {
+    // across the curtain (-1..1, weighted to the heavy middle), phase, rate, size
+    const a = r() + r() - 1;          // triangular: favours the middle, reaches the edges
+    seed.set([a, r(), 0.055 + r() * 0.07, 1.1 + r() * 2.2], i * 4);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(SPRAY_N * 3), 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
+
+  const pts = new THREE.Points(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: true,
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+      uTime:    { value: 0 },
+      uBase:    { value: new THREE.Vector3(FALL_CX, POOL_Y, POOL_Z) },
+      uHalfW:   { value: FALL_W / 2 },
+      uViewH:   { value: 1 },
+      uCol:     { value: SKY.clone().multiplyScalar(0.92) },
+      uOpacity: { value: 0.24 },
+    }]),
+    vertexShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform float uTime, uHalfW, uViewH;
+      uniform vec3  uBase;
+      attribute vec4 aSeed;   // (across, phase, rate, size)
+      varying float vAlpha;
+      void main() {
+        float life = fract(uTime * aSeed.z + aSeed.y);          // 0 → 1, then reborn
+        // White on white shows nothing: the spray only reads where it spills
+        // past the curtain — over the cliff foot either side and out across
+        // the pool — so it has to fan wider and travel further than the sheet.
+        float lift = 4.0 + 9.0 * fract(aSeed.y * 7.13);
+        float run  = 3.0 + 8.0 * fract(aSeed.y * 3.71);
+        // a third of them are rollers: they stay low and run out across the
+        // pool, the way mist spills off a plunge along the water
+        if (fract(aSeed.y * 11.3) < 0.34) {
+          lift = 0.6 + 1.6 * fract(aSeed.y * 5.9);
+          run  = 9.0 + 11.0 * fract(aSeed.y * 2.3);
+        }
+        vec3 p = uBase;
+        p.x += aSeed.x * uHalfW * (0.85 + 0.80 * life);          // fans out as it climbs
+        p.x += sin(uTime * 0.6 + aSeed.y * 40.0) * 0.8 * life;    // and wanders
+        p.y += 0.15 + pow(life, 0.62) * lift;                      // fast off the water, then slows
+        p.z += 0.4 + life * run;                                   // carried downstream
+        vec4 mvPosition = modelViewMatrix * vec4(p, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        // A point sprite is tested at its centre's depth, so the pool just in
+        // front of a billow clipped its lower half flat along the waterline.
+        // Pull the depth (only the depth) a few units toward the eye: the
+        // pool no longer cuts it, while a cliff between eye and falls still does.
+        vec4 nearer = projectionMatrix * (mvPosition + vec4(0.0, 0.0, min(6.0, -mvPosition.z * 0.5), 0.0));
+        gl_Position.z = nearer.z / nearer.w * gl_Position.w;
+        // world-sized billows: grow as they rise, scaled to pixels by distance
+        float size = aSeed.w * (0.7 + 2.3 * life);
+        gl_PointSize = size * projectionMatrix[1][1] * uViewH * 0.5 / max(-mvPosition.z, 0.1);
+        vAlpha = smoothstep(0.0, 0.10, life) * (1.0 - smoothstep(0.50, 1.0, life));
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform vec3  uCol;
+      uniform float uOpacity;
+      varying float vAlpha;
+      void main() {
+        float r = length(gl_PointCoord - 0.5) * 2.0;
+        float soft = 1.0 - smoothstep(0.15, 1.0, r);
+        float a = soft * soft * vAlpha * uOpacity;
+        if (a < 0.003) discard;
+        // lit from above, shadowed beneath — a flat disc reads as a sticker,
+        // a shaded one as a billow with volume
+        vec3 c = uCol * mix(1.04, 0.80, gl_PointCoord.y);
+        gl_FragColor = vec4(c, a);
+        #include <fog_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  }));
+  pts.frustumCulled = false;
+  pts.renderOrder = 3;           // over the falls, whose foot it is hiding
+  scene.add(pts);
+  return pts;
+})();
+const setSprayViewport = () => {
+  spray.material.uniforms.uViewH.value = VH * renderer.getPixelRatio();
+};
+setSprayViewport();
+
 /* ── input ──────────────────────────────────────────────────────
    Drag to look around, scroll to close in on the falls. The scripted
    drift keeps running until the first touch, then hands over for good.
@@ -1391,6 +1493,7 @@ const ro = new ResizeObserver(() => {
   camera.aspect = VW / VH;
   camera.updateProjectionMatrix();
   renderer.setSize(VW, VH, false);
+  setSprayViewport();
 });
 ro.observe(box);
 
@@ -1431,6 +1534,8 @@ function frame() {
   for (const f of fallLayers) f.material.uniforms.uTime.value = t;
   for (const m of inkMats) m.uniforms.uTime.value = t;
   if (!reduceMotion) LIGHTING.mistTime.value = t;
+  // spray holds a single still frame for reduced motion rather than vanishing
+  spray.material.uniforms.uTime.value = reduceMotion ? 3.7 : t;
 
   for (const m of mists) {
     m.position.x += m.userData.sp * 0.016;
