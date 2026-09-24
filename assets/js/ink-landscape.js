@@ -904,6 +904,7 @@ const inkMat = (dark, light, translucency = 0) => {
       uniform float uTime;
       attribute vec3 aSwayVec;   // full displacement at peak sway
       attribute vec2 aSwayT;     // (speed, phase)
+      attribute vec2 aStalk;     // (base y, height) of the culm this part belongs to
       varying vec2 vUv;
       varying vec3 vWN;
       void main() {
@@ -912,7 +913,10 @@ const inkMat = (dark, light, translucency = 0) => {
         vWN = normalize(mat3(modelMatrix) * objN);
 
         vec4 worldPosition = modelMatrix * instanceMatrix * vec4(position, 1.0);
-        worldPosition.xyz += aSwayVec * sin(uTime * aSwayT.x + aSwayT.y);
+        // one continuous quadratic bend per culm, sampled at this vertex's
+        // height, so every segment, node, twig and leaf agrees where they meet
+        float hf = clamp((worldPosition.y - aStalk.x) / aStalk.y, 0.0, 1.3);
+        worldPosition.xyz += aSwayVec * (hf * hf) * sin(uTime * aSwayT.x + aSwayT.y);
         vec3 transformedNormal = normalMatrix * objN;
 
         vec4 mvPosition = viewMatrix * worldPosition;
@@ -1069,8 +1073,13 @@ const ORIGIN = new THREE.Vector3(), DIR = new THREE.Vector3(), TIP = new THREE.V
 const UP = new THREE.Vector3(0, 1, 0);
 
 const segD = [], ringD = [], branchD = [], leafD = [];
-const push = (arr, mat, sx, sy, sz, speed, phase) =>
-  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase] });
+/* Sway is a single smooth bend per culm, evaluated per vertex from its height
+   in the shader. Each part carries the culm's full-height amplitude and its
+   (base, height); before, every segment was rigidly shifted by the amount at
+   its own foot, so neighbouring segments moved by different amounts and the
+   culm came apart at every node in the wind. */
+const push = (arr, mat, sx, sy, sz, speed, phase, st) =>
+  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase], k: [st.base, st.h] });
 
 /* culms and their node rings, at rest */
 for (const st of stalks) {
@@ -1091,13 +1100,13 @@ for (const st of stalks) {
     E.set(tilt * Math.sin(st.dir), 0, -tilt * Math.cos(st.dir));
     Q.setFromEuler(E);
 
-    const amp = reduceMotion ? 0 : st.amp * f0 * f0 * st.h;
+    const amp = reduceMotion ? 0 : st.amp * st.h;   // displacement at the tip
     S3.set(rad, segH * 1.02, rad);
-    push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
+    push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph, st);
 
     if (s > 0 && showRings) {
       S3.set(rad, st.r * 0.30, rad);
-      push(ringD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph);
+      push(ringD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph, st);
     }
   }
 }
@@ -1116,13 +1125,13 @@ for (const br of branchPlan) {
   br._org = ORIGIN.clone();
   br._dir = DIR.clone();
 
-  const amp = reduceMotion ? 0 : st.amp * br.f * br.f * st.h;
+  const amp = reduceMotion ? 0 : st.amp * st.h;     // the culm's, not this node's
   br._sway = [Math.cos(st.dir) * amp, 0, Math.sin(st.dir) * amp];
   br._t    = [st.sp, st.ph];
 
   Q.setFromUnitVectors(UP, DIR);
   S3.set(br.rad, br.len, br.rad);
-  push(branchD, M.compose(ORIGIN, Q, S3), ...br._sway, st.sp, st.ph);
+  push(branchD, M.compose(ORIGIN, Q, S3), ...br._sway, st.sp, st.ph, st);
 }
 
 /* Every leaf is built in its own branch's frame: it continues along the twig,
@@ -1153,7 +1162,7 @@ for (const lf of leafPlan) {
 
   S3.set(lf.wid, lf.len, lf.len);
   M.makeBasis(XA, YA, ZA).scale(S3).setPosition(TIP);
-  push(leafD, M, ...br._sway, br._t[0], br._t[1]);
+  push(leafD, M, ...br._sway, br._t[0], br._t[1], stalks[br.s]);
 }
 
 function buildMesh(geo, mat, data) {
@@ -1161,13 +1170,16 @@ function buildMesh(geo, mat, data) {
   const mesh = new THREE.InstancedMesh(geo, mat, n);
   const sway = new Float32Array(n * 3);
   const time = new Float32Array(n * 2);
+  const stalk = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) {
     mesh.setMatrixAt(i, data[i].m);
     sway.set(data[i].s, i * 3);
     time.set(data[i].t, i * 2);
+    stalk.set(data[i].k, i * 2);
   }
   geo.setAttribute('aSwayVec', new THREE.InstancedBufferAttribute(sway, 3));
   geo.setAttribute('aSwayT',   new THREE.InstancedBufferAttribute(time, 2));
+  geo.setAttribute('aStalk',   new THREE.InstancedBufferAttribute(stalk, 2));
   mesh.frustumCulled = false;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
