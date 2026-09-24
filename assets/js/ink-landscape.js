@@ -1032,11 +1032,15 @@ for (let s = 0; s < stalks.length; s++) {
       const bi = branchPlan.length;
       const bLen = st.h * (0.06 + rnd() * 0.09);
       branchPlan.push({
-        s, f: f + (rnd() - 0.5) * 0.08,
+        // never above the culm's own tip: the top node sat at exactly 1.0 and
+        // the jitter pushed its sprays into thin air
+        s, f: Math.min(f + (rnd() - 0.5) * 0.08, 0.97),
         yaw:   rnd() * Math.PI * 2,
         len:   bLen,
         droop: 0.02 + rnd() * 0.20,             // branches held out, only a slight bow
-        rad:   st.r * 0.09,
+        // thick enough to stay on screen — at 0.09 of the culm a twig was
+        // sub-pixel, so the leaves along it seemed to hover unattached
+        rad:   Math.max(st.r * 0.16, 0.03),
         ph:    rnd() * Math.PI * 2,
       });
 
@@ -1046,7 +1050,7 @@ for (let s = 0; s < stalks.length; s++) {
         leafPlan.push({
           b: bi,
           // leaves alternate along the twig rather than bunching at its tip
-          along:  0.30 + (l / Math.max(1, nl - 1)) * 0.70 + (rnd() - 0.5) * 0.09,
+          along:  Math.min(0.30 + (l / Math.max(1, nl - 1)) * 0.70 + (rnd() - 0.5) * 0.09, 1.0),
           // fanned to alternating sides OF THE BRANCH, not of the world
           spread: (l % 2 ? 1 : -1) * (0.18 + rnd() * 0.38),
           droop:  -0.36 + rnd() * 0.26,         // blades angle up and outward, crisp rather than hanging
