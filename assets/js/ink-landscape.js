@@ -921,7 +921,7 @@ const inkMats = [];
 /* `light` is the albedo, `dark` what it drifts toward at the tip. Lighting is
    the same sun and sky as the rock, in world space — the old version lit each
    blade from a fixed direction in view space, so the light swung with the eye. */
-const inkMat = (dark, light, translucency = 0) => {
+const inkMat = (dark, light, translucency = 0, culm = 0) => {
   const m = new THREE.ShaderMaterial({
     fog: true, lights: true, side: THREE.DoubleSide,
     uniforms: litUniforms({
@@ -929,6 +929,9 @@ const inkMat = (dark, light, translucency = 0) => {
       dark:  { value: new THREE.Color(dark) },
       light: { value: new THREE.Color(light) },
       translucency: { value: translucency },
+      culm:  { value: culm },   // 1 on culm segments: age tint and node powder
+      aged:  { value: new THREE.Color('#6b6a3e') },
+      powder:{ value: new THREE.Color('#9aa39a') },
     }),
     vertexShader: /* glsl */`
       #include <common>
@@ -937,9 +940,10 @@ const inkMat = (dark, light, translucency = 0) => {
       uniform float uTime;
       attribute vec3 aSwayVec;   // full displacement at peak sway
       attribute vec2 aSwayT;     // (speed, phase)
-      attribute vec2 aStalk;     // (base y, height) of the culm this part belongs to
+      attribute vec3 aStalk;     // (base y, height, age) of the culm this part belongs to
       varying vec2 vUv;
       varying vec3 vWN, vMistPos;
+      varying float vAge, vHf;
       void main() {
         vUv = uv;
         vec3 objN = normalize(mat3(instanceMatrix) * normal);
@@ -952,6 +956,8 @@ const inkMat = (dark, light, translucency = 0) => {
         worldPosition.xyz += aSwayVec * (hf * hf) * sin(uTime * aSwayT.x + aSwayT.y);
         vec3 transformedNormal = normalMatrix * objN;
         vMistPos = worldPosition.xyz;
+        vAge = aStalk.z;
+        vHf  = hf;
 
         vec4 mvPosition = viewMatrix * worldPosition;
         gl_Position = projectionMatrix * mvPosition;
@@ -965,14 +971,24 @@ const inkMat = (dark, light, translucency = 0) => {
       ${LIGHT_GLSL}
       ${NOISE_GLSL}
       ${MIST_GLSL}
-      uniform vec3  dark, light;
-      uniform float translucency;
+      uniform vec3  dark, light, aged, powder;
+      uniform float translucency, culm;
       varying vec2 vUv;
       varying vec3 vWN, vMistPos;
+      varying float vAge, vHf;
       void main() {
         vec3 N = normalize(vWN);
         N = gl_FrontFacing ? N : -N;
-        vec3  albedo = mix(light, dark, vUv.y * 0.35);   // tips darken
+        vec3  albedo = mix(light, dark, vUv.y * 0.35 * (1.0 - culm));   // tips darken
+        // older culms fade from green toward straw; every part of the plant shares it
+        albedo = mix(albedo, aged, vAge * 0.55);
+        if (culm > 0.5) {
+          albedo *= 0.92 + 0.16 * vHf;   // the sheath-stained foot is darker
+          // the waxy white bloom just below each node, patchy around the culm
+          float band = smoothstep(0.80, 0.88, vUv.y) * (1.0 - smoothstep(0.93, 0.985, vUv.y));
+          band *= 0.55 + 0.45 * noise3(vec3(vUv.x * 18.0, vUv.y * 6.0, vAge * 40.0));
+          albedo = mix(albedo, powder, band * (0.55 - 0.3 * vAge));
+        }
         float sh     = getShadowMask();
         vec3  col    = shadeLit(albedo, N, sh, 1.0);
         // a blade is thin enough for the sun to come through from behind
@@ -1115,7 +1131,13 @@ const segD = [], ringD = [], branchD = [], leafD = [];
    its own foot, so neighbouring segments moved by different amounts and the
    culm came apart at every node in the wind. */
 const push = (arr, mat, sx, sy, sz, speed, phase, st) =>
-  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase], k: [st.base, st.h] });
+  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase], k: [st.base, st.h, culmAge(st)] });
+/* 0 for a green first-year shoot, 1 for an old yellowed culm. Hashed from the
+   position so it costs no draws from rnd() and the grove's layout is unchanged. */
+function culmAge(st) {
+  const v = Math.sin(st.x * 12.9898 + st.z * 78.233) * 43758.5453;
+  return Math.pow(v - Math.floor(v), 1.6);
+}
 
 /* culms and their node rings, at rest */
 for (const st of stalks) {
@@ -1206,16 +1228,16 @@ function buildMesh(geo, mat, data) {
   const mesh = new THREE.InstancedMesh(geo, mat, n);
   const sway = new Float32Array(n * 3);
   const time = new Float32Array(n * 2);
-  const stalk = new Float32Array(n * 2);
+  const stalk = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
     mesh.setMatrixAt(i, data[i].m);
     sway.set(data[i].s, i * 3);
     time.set(data[i].t, i * 2);
-    stalk.set(data[i].k, i * 2);
+    stalk.set(data[i].k, i * 3);
   }
   geo.setAttribute('aSwayVec', new THREE.InstancedBufferAttribute(sway, 3));
   geo.setAttribute('aSwayT',   new THREE.InstancedBufferAttribute(time, 2));
-  geo.setAttribute('aStalk',   new THREE.InstancedBufferAttribute(stalk, 2));
+  geo.setAttribute('aStalk',   new THREE.InstancedBufferAttribute(stalk, 3));
   mesh.frustumCulled = false;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -1223,7 +1245,7 @@ function buildMesh(geo, mat, data) {
   return mesh;
 }
 
-buildMesh(stalkGeo,  inkMat('#1a2620', '#3f5238'), segD);
+buildMesh(stalkGeo,  inkMat('#1a2620', '#3f5238', 0, 1), segD);
 buildMesh(ringGeo,   inkMat('#161f14', '#2b3824'), ringD);
 buildMesh(branchGeo, inkMat('#18231a', '#33452f'), branchD);
 buildMesh(leafGeo,   inkMat('#223020', '#46583a', 0.45), leafD);
