@@ -866,7 +866,7 @@ function leafGeometry() {
   for (let i = 0; i <= S; i++) {
     const t = i / S;
     const w = Math.sin(Math.pow(t, 0.72) * Math.PI) * 0.5 * (1 - t * 0.30);
-    const bend = -Math.pow(t, 2.3) * 0.28;   // a bamboo blade barely curls
+    const bend = -Math.pow(t, 2.6) * 0.10;   // a bamboo blade is nearly flat and stiff
     pos.push(-w, t, bend, w, t, bend);
     uv.push(0, t, 1, t);
   }
@@ -1035,7 +1035,7 @@ for (let s = 0; s < stalks.length; s++) {
         s, f: f + (rnd() - 0.5) * 0.08,
         yaw:   rnd() * Math.PI * 2,
         len:   bLen,
-        droop: 0.16 + rnd() * 0.34,             // branches bow under their leaves
+        droop: 0.02 + rnd() * 0.20,             // branches held out, only a slight bow
         rad:   st.r * 0.09,
         ph:    rnd() * Math.PI * 2,
       });
@@ -1048,8 +1048,8 @@ for (let s = 0; s < stalks.length; s++) {
           // leaves alternate along the twig rather than bunching at its tip
           along:  0.30 + (l / Math.max(1, nl - 1)) * 0.70 + (rnd() - 0.5) * 0.09,
           // fanned to alternating sides OF THE BRANCH, not of the world
-          spread: (l % 2 ? 1 : -1) * (0.24 + rnd() * 0.48),
-          droop:  -0.10 + rnd() * 0.30,         // held out stiffly, barely dipping
+          spread: (l % 2 ? 1 : -1) * (0.18 + rnd() * 0.38),
+          droop:  -0.36 + rnd() * 0.26,         // blades angle up and outward, crisp rather than hanging
           len,
           wid:    len * (0.085 + rnd() * 0.04), // a bamboo leaf is ~10× longer than wide
           ph:     rnd() * Math.PI * 2,
