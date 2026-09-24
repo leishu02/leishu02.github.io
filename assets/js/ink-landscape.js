@@ -26,23 +26,118 @@ const sizeOf = () => {
 let { w: VW, h: VH } = sizeOf();
 
 /* ══════════════════════════════════════════════════════════════
-   Palette — every colour derived from ink diluted on paper
+   Palette
    ══════════════════════════════════════════════════════════════ */
-const PAPER      = new THREE.Color('#eef2f2');
-const INK_NEAR   = new THREE.Color('#2b4150');
-const INK_MID    = new THREE.Color('#5c7d8e');
-const WATER_INK  = new THREE.Color('#5d8ba6');
+const PAPER = new THREE.Color('#eef2f2');   // the page colour the hero has to meet
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Phones and small machines get the same scene with a lighter hand: fewer noise
+// octaves, a smaller shadow map, native-ish pixel density.
+const lowPower = matchMedia('(max-width: 720px)').matches
+              || (navigator.hardwareConcurrency || 8) <= 4;
 
-/* ── renderer ───────────────────────────────────────────────── */
+/* ── renderer ─────────────────────────────────────────────────
+   Linear lighting, filmic tone mapping, sRGB out. Every custom shader ends in
+   the tonemapping + colorspace chunks so it goes through the same curve as the
+   sky; before this the shaders wrote linear values straight to the screen and
+   the whole scene sat darker than its own fog colour. */
 const renderer = new THREE.WebGLRenderer({ antialias: true, canvas });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(devicePixelRatio, lowPower ? 1.25 : 1.5));
 renderer.setSize(VW, VH, false);   // false: never write inline CSS size onto the canvas
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.6;   // three's ACES divides by 0.6: this is neutral
 renderer.setClearColor(PAPER, 1);
+// The sun never moves and the only thing that does — bamboo swaying — is too
+// slight to show in a shadow, so the shadow map is drawn exactly once.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = true;
+
+/* The sky is brighter than paper white on purpose: the film curve pulls it
+   back down, and it has to land on the page's own colour for the hero to melt
+   into the page. Fog uses the same value so distance dissolves into the sky
+   rather than into a band slightly darker than it. */
+const SKY_GAIN = 3.4;
+const SKY = PAPER.clone().multiplyScalar(SKY_GAIN);
 
 const scene  = new THREE.Scene();
-scene.fog    = new THREE.FogExp2(PAPER.getHex(), 0.0060);
+scene.fog    = new THREE.FogExp2(SKY, 0.0036);
+
+/* ── one light for everything ─────────────────────────────────
+   A soft, high sun from the right, and a strong overcast sky: a misty gorge is
+   lit mostly by the sky, with the sun only raking the rock enough to show it. */
+const SUN_DIR = new THREE.Vector3(0.55, 0.62, 0.35).normalize();
+const LIGHTING = {
+  sunDir:    { value: SUN_DIR },
+  sunColor:  { value: new THREE.Color(1.00, 0.95, 0.88).multiplyScalar(2.1) },
+  skyAmb:    { value: new THREE.Color(0.74, 0.81, 0.86) },
+  groundAmb: { value: new THREE.Color(0.30, 0.31, 0.28) },
+};
+const LIGHT_GLSL = /* glsl */`
+  uniform vec3 sunDir, sunColor, skyAmb, groundAmb;
+  // Lambert from the sun, hemisphere ambient from sky and ground. AO darkens
+  // only the ambient: occlusion is about sky you cannot see, not the sun.
+  vec3 shadeLit(vec3 albedo, vec3 N, float shadow, float ao) {
+    float ndl = max(dot(N, sunDir), 0.0);
+    vec3 amb  = mix(groundAmb, skyAmb, N.y * 0.5 + 0.5);
+    return albedo * (sunColor * ndl * shadow + amb * ao);
+  }`;
+
+/* Procedural 3D value noise. Solid noise needs no UV layout and no triplanar
+   blending — it is defined everywhere in space, so a cliff face and a ledge
+   top read from the same rock. OCTAVES is a compile-time define so phones can
+   run fewer. */
+const NOISE_GLSL = /* glsl */`
+  #ifndef OCTAVES
+  #define OCTAVES 5
+  #endif
+  float hash3(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1);
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+  }
+  float noise3(vec3 x) {
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i + vec3(0,0,0)), hash3(i + vec3(1,0,0)), f.x),
+                   mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+               mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+                   mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
+  }
+  float fbm3(vec3 p) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < OCTAVES; i++) {
+      s += a * noise3(p);
+      p = p * 2.03 + vec3(1.7, 9.2, 3.1);
+      a *= 0.5;
+    }
+    return s;
+  }
+  // Bump a normal by a scalar height field using screen-space derivatives —
+  // relief with no extra geometry and no tangent frame.
+  vec3 perturbNormal(vec3 pos, vec3 N, float h, float strength) {
+    vec3 dpdx = dFdx(pos), dpdy = dFdy(pos);
+    float dhdx = dFdx(h), dhdy = dFdy(h);
+    vec3 r1 = cross(dpdy, N), r2 = cross(N, dpdx);
+    float det = dot(dpdx, r1);
+    vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
+    return normalize(abs(det) * N - strength * grad);
+  }`;
+
+// Materials that receive the sun's shadow need three's light uniforms merged in;
+// the shared lighting uniforms are then attached by reference.
+const litUniforms = extra => {
+  const u = THREE.UniformsUtils.merge([THREE.UniformsLib.lights, THREE.UniformsLib.fog, extra]);
+  return Object.assign(u, LIGHTING);
+};
+const SHADOW_PARS_FRAG = /* glsl */`
+  #include <packing>
+  #include <bsdfs>
+  #include <lights_pars_begin>
+  #include <shadowmap_pars_fragment>
+  #include <shadowmask_pars_fragment>`;
+const DEFINES = { OCTAVES: lowPower ? 3 : 5 };
 
 const camera = new THREE.PerspectiveCamera(40, VW / VH, 0.1, 700);
 camera.position.set(0, 5.2, 34);
@@ -112,9 +207,10 @@ function terrainHeight(x, z) {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   TERRAIN — real displaced geometry, shaded as ink wash
+   TERRAIN — displaced geometry, lit rock and ground
    ══════════════════════════════════════════════════════════════ */
 const TW = 420, TD = 460, SEG = 300;
+const CELL_X = TW / SEG, CELL_Y = TD / SEG;
 const tGeo = new THREE.PlaneGeometry(TW, TD, SEG, SEG);
 {
   const p = tGeo.attributes.position;
@@ -128,50 +224,189 @@ const tGeo = new THREE.PlaneGeometry(TW, TD, SEG, SEG);
   tGeo.computeVertexNormals();
 }
 
+/* Ambient occlusion, baked once from the height grid: for each vertex, how
+   much sky the surrounding terrain hides (horizon angle in eight directions).
+   The gorge floor and the foot of every cliff darken; ridges stay open. This
+   is what grounds things — without it nothing touches anything. Reads from the
+   grid rather than re-sampling the noise, so it costs a few milliseconds. */
+const terrainAO = (() => {
+  const p = tGeo.attributes.position, W1 = SEG + 1;
+  const H = new Float32Array(p.count);
+  for (let i = 0; i < p.count; i++) H[i] = p.getZ(i);
+  const ao = new Float32Array(p.count);
+  const DIRS = 8, RADII = [1.5, 3.5, 7, 13, 24];
+  const dirs = [];
+  for (let k = 0; k < DIRS; k++) {
+    const a = (k / DIRS) * Math.PI * 2;
+    dirs.push([Math.cos(a), Math.sin(a)]);
+  }
+  for (let iy = 0; iy <= SEG; iy++) {
+    for (let ix = 0; ix <= SEG; ix++) {
+      const i = iy * W1 + ix, h0 = H[i];
+      let occ = 0;
+      for (const [dx, dy] of dirs) {
+        let best = 0;
+        for (const r of RADII) {
+          const sx = Math.round(ix + (dx * r) / CELL_X);
+          const sy = Math.round(iy + (dy * r) / CELL_Y);
+          if (sx < 0 || sy < 0 || sx > SEG || sy > SEG) break;
+          const tan = (H[sy * W1 + sx] - h0) / r;
+          if (tan > best) best = tan;
+        }
+        occ += best / Math.sqrt(1 + best * best);   // sine of the horizon angle
+      }
+      ao[i] = 1 - occ / DIRS;
+    }
+  }
+  return ao;
+})();
+tGeo.setAttribute('aAO', new THREE.BufferAttribute(terrainAO, 1));
+
 const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
-  fog: true,
-  uniforms: {
-    paper:   { value: PAPER },
-    inkNear: { value: INK_NEAR },
-    inkMid:  { value: INK_MID },
-    fogColor:{ value: scene.fog.color },
-    fogDensity: { value: scene.fog.density },
-  },
+  fog: true, lights: true, defines: DEFINES,
+  uniforms: litUniforms({
+    fallTop: { value: FALL_TOP },
+    fallBot: { value: FALL_BOT },
+    fallH:   { value: FALL_H },
+  }),
   vertexShader: /* glsl */`
     #include <common>
+    #include <shadowmap_pars_vertex>
     #include <fog_pars_vertex>
-    varying float vH;      // height above the water
-    varying float vSlope;  // 1 = flat, 0 = sheer
+    attribute float aAO;
+    varying float vAO;
+    varying vec3  vWorld, vWN;
     void main() {
-      vH = position.z;
-      vSlope = normal.z;
+      vAO = aAO;
+      #include <beginnormal_vertex>
+      #include <defaultnormal_vertex>
       #include <begin_vertex>
       #include <project_vertex>
+      #include <worldpos_vertex>
+      #include <shadowmap_vertex>
       #include <fog_vertex>
+      vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+      vWN    = normalize(mat3(modelMatrix) * normal);
     }`,
   fragmentShader: /* glsl */`
     #include <common>
     #include <fog_pars_fragment>
-    uniform vec3 paper, inkNear, inkMid;
-    varying float vH;
-    varying float vSlope;
+    ${SHADOW_PARS_FRAG}
+    ${LIGHT_GLSL}
+    ${NOISE_GLSL}
+    uniform float fallTop, fallBot, fallH;
+    varying float vAO;
+    varying vec3  vWorld, vWN;
+
     void main() {
-      float h     = clamp(vH / 30.0, 0.0, 1.0);
-      float cliff = clamp(1.0 - vSlope, 0.0, 1.0);
+      vec3  p     = vWorld;
+      vec3  Ng    = normalize(vWN);
+      float steep = 1.0 - clamp(Ng.y, 0.0, 1.0);          // 0 flat, 1 sheer
+      float range = length(cameraPosition - p);
+      // micro-relief fades with distance: past this it only aliases, and the
+      // fog is carrying the far ranges anyway
+      float detail = 1.0 - smoothstep(70.0, 230.0, range);
 
-      // pigment settles on steep faces; the foot of every hill dissolves in mist
-      float ink = smoothstep(0.015, 0.30, h);
-      ink *= 0.30 + 1.05 * cliff;
-      ink += 0.34 * smoothstep(0.55, 0.95, h) * cliff;   // ridge accents
-      ink = clamp(ink, 0.0, 1.0);
+      // height above the local waterline — the bed steps up above the falls
+      float bed   = fallH * (1.0 - smoothstep(fallTop, fallBot, p.z));
+      float above = p.y - (bed + 0.28);
 
-      vec3 col = mix(paper, mix(inkMid, inkNear, ink), ink);
+      // ROCK. Thick bedding planes, strongly warped so no two read as parallel
+      // rules, broken into ledges of uneven height; sparse vertical joints; a
+      // fine grain over everything. Evenly spaced layers read as masonry.
+      float n1      = fbm3(p * 0.21);
+      float warp    = fbm3(p * 0.045);
+      float stratum = p.y * 0.17 + warp * 3.4 + fbm3(p * vec3(0.02, 0.0, 0.02)) * 2.0;
+      float bandW   = 0.18 + 0.30 * noise3(p * 0.07);            // ledge edges vary
+      float ledge   = smoothstep(0.0, bandW, abs(fract(stratum) - 0.5) * 2.0);
+      // Bedding only shows on near-vertical faces. On a moderate slope the same
+      // horizontal planes cut shallowly and spread into contour-map bands.
+      ledge = mix(0.6, ledge, smoothstep(0.42, 0.78, steep));
+      // joints stretched along y so they run down the face, not round it
+      float joint   = 1.0 - abs(noise3(p * vec3(0.22, 0.035, 0.22)) * 2.0 - 1.0);
+      float crack   = smoothstep(0.955, 0.995, joint) * smoothstep(0.35, 0.65, noise3(p * 0.05));
+      float grain   = detail > 0.0 ? fbm3(p * 1.35) : 0.5;
+      float rockH   = ledge * 0.50 + grain * 0.50 - crack * 0.7;
+
+      // Rock relief only where there is rock. On gentle ground the same field
+      // drew contour-like squiggles; there it gets an isotropic grain instead.
+      float rockMask = smoothstep(0.26, 0.60, steep);
+      float bumpH    = mix(grain, rockH, rockMask);
+      vec3  N = perturbNormal(p, Ng, bumpH, mix(0.12, 1.0, rockMask) * detail);
+
+      // albedo, in linear light
+      vec3 rockCol = mix(vec3(0.090, 0.095, 0.098), vec3(0.185, 0.188, 0.186), n1);
+      rockCol *= (0.86 + 0.24 * ledge) * (1.0 - 0.35 * crack);
+      vec3 mossCol = vec3(0.055, 0.075, 0.046) * (0.78 + 0.44 * n1);
+      vec3 soilCol = vec3(0.135, 0.135, 0.118) * (0.84 + 0.32 * grain);
+
+      // moss likes low, damp, gentle ground — and the tops of ledges
+      float damp = 1.0 - smoothstep(0.0, 16.0, above);
+      float moss = (1.0 - smoothstep(0.12, 0.55, steep)) * (0.42 + 0.58 * damp);
+      moss = max(moss, rockMask * smoothstep(0.62, 0.95, N.y) * 0.65);
+      vec3 albedo = mix(soilCol, mossCol, clamp(moss, 0.0, 1.0));
+      albedo = mix(albedo, rockCol, rockMask);
+      // stone darkens where the water keeps it wet
+      albedo *= mix(0.52, 1.0, smoothstep(0.0, 1.8, above));
+
+      vec3 col = shadeLit(albedo, N, getShadowMask(), vAO);
       gl_FragColor = vec4(col, 1.0);
       #include <fog_fragment>
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
     }`,
 }));
 terrain.rotation.x = -Math.PI / 2;
+terrain.receiveShadow = true;
+terrain.castShadow = true;
 scene.add(terrain);
+
+/* ── the sun, as far as three is concerned ─────────────────────
+   Only here to drive the shadow map; the shaders do their own lighting from
+   SUN_DIR. Its orthographic shadow camera is framed on the gorge — the far
+   ranges are in fog and don't need shadow resolution spent on them. */
+const sun = new THREE.DirectionalLight(0xffffff, 1);
+sun.target.position.set(LIP_CX, 0, FALL_BOT - 10);
+sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 220);
+sun.castShadow = true;
+sun.shadow.mapSize.set(lowPower ? 1024 : 2048, lowPower ? 1024 : 2048);
+Object.assign(sun.shadow.camera, { left: -125, right: 125, top: 125, bottom: -125, near: 10, far: 480 });
+sun.shadow.bias = -0.0006;
+sun.shadow.normalBias = 0.5;
+sun.shadow.radius = 3;
+scene.add(sun, sun.target);
+
+/* ── sky ───────────────────────────────────────────────────────
+   A dome that follows the eye, so the sky goes through the same film curve as
+   everything under it. The horizon is exactly the fog colour; overhead it cools
+   and deepens slightly, and brightens toward the sun. */
+const sky = new THREE.Mesh(
+  new THREE.SphereGeometry(640, 32, 16),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { horizon: { value: SKY }, sunDir: { value: SUN_DIR } },
+    vertexShader: /* glsl */`
+      varying vec3 vDir;
+      void main() {
+        vDir = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 horizon, sunDir;
+      varying vec3 vDir;
+      void main() {
+        vec3 d = normalize(vDir);
+        vec3 zenith = horizon * vec3(0.86, 0.91, 0.97);
+        vec3 col = mix(horizon, zenith, smoothstep(0.02, 0.65, d.y));
+        col *= 1.0 + 0.10 * pow(max(dot(d, sunDir), 0.0), 6.0);
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  })
+);
+sky.renderOrder = -1;
+scene.add(sky);
 
 /* ══════════════════════════════════════════════════════════════
    WATER — rippling plane, sky-pale at grazing angles
@@ -180,24 +415,25 @@ const water = new THREE.Mesh(
   // dense along its length so the lip of the falls stays a crisp edge
   new THREE.PlaneGeometry(300, 460, 200, 460),
   new THREE.ShaderMaterial({
-    fog: true, transparent: true,
-    uniforms: {
+    fog: true, transparent: true, lights: true,
+    uniforms: litUniforms({
       uTime:   { value: 0 },
-      water:   { value: WATER_INK },
-      paper:   { value: PAPER },
+      // a gorge pool is dark: nearly all of its brightness is reflected sky
+      water:   { value: new THREE.Color(0.030, 0.048, 0.052) },
+      paper:   { value: SKY },
       fallTop: { value: FALL_TOP },
       fallBot: { value: FALL_BOT },
       fallH:   { value: FALL_H },
       fallCx:  { value: 0 },          // set once the channel has been measured
-      fogColor:{ value: scene.fog.color },
-      fogDensity: { value: scene.fog.density },
-    },
+      fallHalfW: { value: 10 },       // likewise
+      wallCol: { value: new THREE.Color(0.19, 0.20, 0.19) },  // lit gorge rock, roughly
+    }),
     vertexShader: /* glsl */`
       #include <common>
+      #include <shadowmap_pars_vertex>
       #include <fog_pars_vertex>
       uniform float uTime;
       uniform float fallTop, fallBot, fallH;
-      varying vec3  vView;
       varying vec3  vWorld;
       varying float vFall;     // 0 on flat water, 1 in the throat of the falls
       void main() {
@@ -214,18 +450,21 @@ const water = new THREE.Mesh(
         pos.z += sin(pos.x * 0.16 + uTime * 0.45) * 0.055
                + sin(pos.y * 0.11 - uTime * 0.33) * 0.045;
 
-        vWorld = (modelMatrix * vec4(pos, 1.0)).xyz;
-        vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
-        vView  = -mvPosition.xyz;
+        vec4 worldPosition     = modelMatrix * vec4(pos, 1.0);
+        vec3 transformedNormal = normalMatrix * vec3(0.0, 0.0, 1.0);
+        vWorld = worldPosition.xyz;
+        vec4 mvPosition = viewMatrix * worldPosition;
         gl_Position = projectionMatrix * mvPosition;
+        #include <shadowmap_vertex>
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */`
       #include <common>
       #include <fog_pars_fragment>
-      uniform vec3 water, paper;
-      uniform float uTime, fallBot, fallCx;
-      varying vec3  vView;
+      ${SHADOW_PARS_FRAG}
+      ${LIGHT_GLSL}
+      uniform vec3 water, paper, wallCol;
+      uniform float uTime, fallBot, fallCx, fallHalfW, fallH;
       varying vec3  vWorld;
       varying float vFall;
 
@@ -265,29 +504,55 @@ const water = new THREE.Mesh(
         vec2 p = vWorld.xz;
         float t = uTime;
 
-        // grazing angles catch a little sky, but the river keeps its ink
-        float fres = pow(1.0 - abs(normalize(vView).y), 2.6);
-        vec3 col = mix(water, paper, 0.16 + 0.34 * fres);
-
         // The surface is shaded by its own slope rather than drawn as contour
         // lines: contours of a downstream-ranked field are by definition
         // horizontal bands, and no amount of tuning makes stripes look like water.
         float r  = ripple(p, t);
         float dx = ripple(p + vec2(0.85, 0.0), t) - r;
         float dz = ripple(p + vec2(0.0, 0.85), t) - r;
-        vec3  n  = normalize(vec3(-dx, 2.4, -dz));
+        vec3  n  = normalize(vec3(-dx, 5.0, -dz));
 
-        float lam = clamp(dot(n, normalize(vec3(0.35, 1.0, 0.22))), 0.0, 1.0);
-        col *= 0.93 + 0.11 * lam;                       // soft undulation
-        col  = mix(col, paper, pow(lam, 5.0) * 0.30);   // sheen on faces turned to the light
+        // Fresnel (Schlick) in world space, against the rippled normal. The old
+        // version took .y of a view-space vector, which is not the angle to the
+        // water at all — it only looked plausible from one camera height.
+        vec3  V    = normalize(cameraPosition - vWorld);
+        float cosT = clamp(dot(n, V), 0.0, 1.0);
+        float F    = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
+
+        // body colour is lit, and takes the cliff's shadow
+        vec3 body = shadeLit(water, vec3(0.0, 1.0, 0.0), getShadowMask(), 1.0);
+
+        // What the reflection actually sees. In a gorge a low reflected ray hits
+        // the walls, not the sky — reflecting open sky everywhere turned the whole
+        // river white. So: follow the reflected ray to the plane of the falls; if
+        // it lands on the curtain, the pool mirrors the falls; otherwise it sees
+        // wall until it rises high enough to clear the rim, then sky.
+        vec3  R   = reflect(-V, n);
+        float env = smoothstep(0.16, 0.55, R.y);
+        vec3  refl = mix(wallCol, paper * 0.94, env);
+        if (R.z < -0.01) {
+          float tHit = (-52.0 - vWorld.z) / R.z;          // the curtain's mid-depth
+          vec3  hit  = vWorld + R * tHit;
+          float onFalls = step(0.0, tHit)
+                        * (1.0 - smoothstep(fallHalfW * 0.85, fallHalfW * 1.02, abs(hit.x - fallCx)))
+                        * step(0.0, hit.y) * (1.0 - smoothstep(fallH * 0.92, fallH, hit.y));
+          refl = mix(refl, paper * 0.80, onFalls);
+        }
+        vec3 col  = mix(body, refl, F);
+        vec3 foamCol    = paper * 0.52;            // white water, a shade under the sky
+        vec3 shallowCol = mix(body, vec3(0.16, 0.16, 0.14), 0.55);  // thin water over the bed
+
+        // a sun glint on facets that tip toward it
+        vec3  Hh   = normalize(sunDir + V);
+        col += sunColor * pow(max(dot(n, Hh), 0.0), 180.0) * 0.35 * getShadowMask();
 
         // Foam leaves the plunge and is carried downstream — a wake, not a halo,
         // so it must be one-sided about the basin and drawn out along the flow.
         float ds = p.y - fallBot;                       // >0 is downstream
-        float wake = smoothstep(-3.0, 1.5, ds) * (1.0 - smoothstep(2.0, 40.0, ds));
+        float wake = smoothstep(-3.0, 1.5, ds) * (1.0 - smoothstep(2.0, 22.0, ds));
         // torn into streamers by the same lengthwise field as the rest of the river
         wake *= 0.55 + 0.45 * (0.5 + 0.5 * sin(p.x * 1.6 + r * 1.2));
-        col = mix(col, vec3(1.0), wake * 0.42);
+        col = mix(col, foamCol, wake * 0.30);
 
         // The churn where the column actually strikes. Without it the pool
         // simply begins along a straight line in z and the seam is obvious.
@@ -295,7 +560,7 @@ const water = new THREE.Mesh(
         float churn = exp(-dot(q, q) * 1.5);
         churn *= 0.52 + 0.48 * (0.5 + 0.5 * sin(p.x * 2.3 + p.y * 1.9 + t * 2.4))
                       * (0.5 + 0.5 * sin(p.x * 5.1 - p.y * 3.3 - t * 3.1));
-        col = mix(col, vec3(1.0), clamp(churn, 0.0, 1.0) * 0.60);
+        col = mix(col, foamCol, clamp(churn, 0.0, 1.0) * 0.55);
 
         // Shallows. The same channel the terrain is carved from, so the water
         // pales exactly where it runs thin over the bank instead of meeting it
@@ -307,15 +572,19 @@ const water = new THREE.Mesh(
         float dw  = abs(p.x - cxr);
         float hw  = 8.0 + 6.0 * bas + 3.5;        // where the wet edge falls
         float shallow = smoothstep(hw - 8.0, hw, dw);
-        col = mix(col, paper, shallow * 0.62);
+        col = mix(col, shallowCol, shallow * 0.62);
 
         // and a thread of light where the current parts around the margin
-        col = mix(col, vec3(1.0),
+        col = mix(col, foamCol,
                   smoothstep(0.55, 0.95, shallow) * (1.0 - smoothstep(0.95, 1.0, shallow))
                   * (0.45 + 0.55 * (0.5 + 0.5 * sin(p.y * 0.7 + r * 2.0))) * 0.30);
 
-        gl_FragColor = vec4(col, 0.94);
+        // the pool's upstream edge fades over its last metre rather than
+        // stopping on a straight line under the falls
+        gl_FragColor = vec4(col, 0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }`,
   })
 );
@@ -394,9 +663,13 @@ function fallsGeometry(nu, nv) {
       // and be clipped by it, leaving a layer that stops in mid-air. Real water
       // hugs the rock instead: slide any buried vertex downstream until it
       // clears, so the back face lies against the face of the cliff.
+      let pushed = false;
       for (let k = 0; k < 60 && terrainHeight(FALL_CX + lx, pz) > y - 0.1; k++) {
-        pz += 0.2;
+        pz += 0.2; pushed = true;
       }
+      // and then stand a little proud of it: lying exactly on the rock, the two
+      // surfaces fought over depth and the loser showed through in blotches
+      if (pushed) pz += 0.45;
 
       pos.push(lx, y, pz);
       uv.push((Math.cos(a) + 1) * 0.5, (T_MAX - t) / (T_MAX - T_MIN));
@@ -423,7 +696,7 @@ const falls = new THREE.Mesh(
     side: THREE.DoubleSide,
     uniforms: {
       uTime:      { value: 0 },
-      paper:      { value: PAPER },
+      paper:      { value: SKY },
       uPool:      { value: U_POOL },
       uLip:       { value: U_LIP },
       uPhase:     { value: 0 },
@@ -447,6 +720,7 @@ const falls = new THREE.Mesh(
     fragmentShader: /* glsl */`
       #include <common>
       #include <fog_pars_fragment>
+      ${NOISE_GLSL}
       uniform float uTime, uPool, uLip, uPhase, uDim;
       uniform vec3  paper;
       varying vec2  vUv;
@@ -454,7 +728,9 @@ const falls = new THREE.Mesh(
 
       // one vertical strand — edges kept tight so dark rock shows between falls
       float ribbon(float x, float c, float w) {
-        return smoothstep(w, w * 0.62, abs(x - c));
+        // edges ordered low→high; reversed edges are undefined in GLSL and only
+        // happen to work on desktop drivers
+        return 1.0 - smoothstep(w * 0.62, w, abs(x - c));
       }
 
       void main() {
@@ -521,48 +797,63 @@ const falls = new THREE.Mesh(
         float glint  = pow(0.5 + 0.5 * sin(ph1 * 0.5 + stagger * 0.6), 16.0);
         float silver = clamp(pick * breath * 0.9 + glint * 0.45, 0.0, 1.0)
                      * smoothstep(0.02, 0.16, m)
-                     * smoothstep(1.12, 0.92, y);      // not on the flat upstream run
+                     * (1.0 - smoothstep(0.92, 1.12, y));      // not on the flat upstream run
 
         // Upstream the sheet dissolves into the river's own surface, so the two
         // hand over rather than butting together at a visible seam.
-        m *= smoothstep(1.42, 1.03, y);
+        m *= (1.0 - smoothstep(1.03, 1.42, y));
         // Nothing of the sheet survives below the surface: its sub-surface part
         // was laying a flat ghost rectangle across the pool.
-        if (y < -0.05) discard;
-        // and the strands dissolve on the way in rather than being cut off
-        m *= smoothstep(-0.02, 0.30, y);
+        if (y < -0.12) discard;
+        // strands dissolve on the way in, but only over the last stretch — a
+        // longer fade left the curtain see-through at its foot
+        m *= smoothstep(-0.02, 0.12, y);
 
         // The loop turns tangent to the eye at the curtain's edges, piling many
         // fragments into one pixel; feather them wide or they stack into a flap.
-        m *= smoothstep(0.005, 0.055, x) * smoothstep(0.995, 0.945, x);
+        m *= smoothstep(0.005, 0.055, x) * (1.0 - smoothstep(0.945, 0.995, x));
 
         // Where it lands: a soft band of foam gathered at the waterline itself,
         // widest where the sheet is heaviest. The pool carries the rest.
-        float band = exp(-pow((y - 0.06) / 0.21, 2.0));
-        float foam = band
-                   * smoothstep(0.06, 0.26, x) * smoothstep(0.94, 0.74, x)
-                   * (0.72 + 0.28 * sin(x * 11.0 - t * 1.1));
+        // The plunge: dense spray over the foot, so the base of the fall is
+        // white water rather than a veil with rock showing through. Kept low and
+        // billowing — a wide even band read as a white wall.
+        float band = exp(-pow((y - 0.03) / 0.13, 2.0));
+        float boil = noise3(vec3(x * 16.0, y * 7.0 - t * 0.9, t * 0.35)) * 0.6
+                   + noise3(vec3(x * 41.0, y * 15.0 - t * 1.6, t * 0.5)) * 0.4;
+        float foam = band * smoothstep(0.28, 0.72, boil + 0.25 * band)
+                   * smoothstep(0.02, 0.14, x) * (1.0 - smoothstep(0.86, 0.98, x));
 
         // Where the shell turns edge-on, front and back pile into the same
         // pixels and stack into a hard bright rib. Fade by facing ratio.
         float facing = abs(dot(normalize(vN), normalize(vV)));
 
-        float a = (clamp(m, 0.0, 1.0) * 0.90 + foam * 0.30 + silver * 0.34)
+        float a = (clamp(m, 0.0, 1.0) * 0.90 + foam * 0.75 + silver * 0.34)
                 * uDim * smoothstep(0.05, 0.40, facing);
         if (a < 0.004) discard;
 
-        vec3 col = mix(paper, vec3(1.0),
-                       clamp(m * 1.12 + foam * 0.55 + silver, 0.0, 1.0));
-        col += vec3(0.06, 0.07, 0.08) * silver;   // the metallic edge of the flare
+        // White water is brighter than the overcast sky behind it; working in
+        // multiples of the sky keeps it the brightest thing in the valley once
+        // the film curve has rolled the highlights off.
+        // Strands live in the upper midtones so the film curve keeps their
+        // texture; only the spray is pushed into full white. When the whole
+        // sheet sat above ACES's shoulder, everything below the lip clipped
+        // to one flat white block.
+        vec3 col = mix(paper * 0.22, paper * 0.72, clamp(m * 1.12 + silver, 0.0, 1.0));
+        col = mix(col, paper * 1.0, clamp(foam, 0.0, 1.0));
+        col += paper * vec3(0.05, 0.06, 0.07) * silver;   // the metallic edge of the flare
         gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
         #include <fog_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }`,
   })
 );
 // centred on the wet channel, which is not the meander line when the banks differ
 falls.position.set(FALL_CX, 0, 0);
 falls.renderOrder = 2;   // transparents sort by object centre; the river's is much nearer
-water.material.uniforms.fallCx.value = FALL_CX;   // now that the channel is measured
+water.material.uniforms.fallCx.value    = FALL_CX;   // now that the channel is measured
+water.material.uniforms.fallHalfW.value = FALL_W / 2;
 scene.add(falls);
 
 const fallLayers = [falls];
@@ -594,49 +885,63 @@ function leafGeometry() {
 /* The grove is laid out once and never touched again — the wind lives in the
    vertex shader, so no matrices are rebuilt on the CPU per frame. */
 const inkMats = [];
-const inkMat = (dark, light, opts = {}) => {
+/* `light` is the albedo, `dark` what it drifts toward at the tip. Lighting is
+   the same sun and sky as the rock, in world space — the old version lit each
+   blade from a fixed direction in view space, so the light swung with the eye. */
+const inkMat = (dark, light, translucency = 0) => {
   const m = new THREE.ShaderMaterial({
-    fog: true, side: THREE.DoubleSide, ...opts,
-    uniforms: {
+    fog: true, lights: true, side: THREE.DoubleSide,
+    uniforms: litUniforms({
       uTime: { value: 0 },
-      dark: { value: new THREE.Color(dark) },
-      light:{ value: new THREE.Color(light) },
-      fogColor:  { value: scene.fog.color },
-      fogDensity:{ value: scene.fog.density },
-    },
+      dark:  { value: new THREE.Color(dark) },
+      light: { value: new THREE.Color(light) },
+      translucency: { value: translucency },
+    }),
     vertexShader: /* glsl */`
       #include <common>
+      #include <shadowmap_pars_vertex>
       #include <fog_pars_vertex>
       uniform float uTime;
       attribute vec3 aSwayVec;   // full displacement at peak sway
       attribute vec2 aSwayT;     // (speed, phase)
       varying vec2 vUv;
-      varying vec3 vN;
+      varying vec3 vWN;
       void main() {
         vUv = uv;
-        vN  = normalize(normalMatrix * normalize(mat3(instanceMatrix) * normal));
+        vec3 objN = normalize(mat3(instanceMatrix) * normal);
+        vWN = normalize(mat3(modelMatrix) * objN);
 
-        vec4 world = modelMatrix * instanceMatrix * vec4(position, 1.0);
-        world.xyz += aSwayVec * sin(uTime * aSwayT.x + aSwayT.y);
+        vec4 worldPosition = modelMatrix * instanceMatrix * vec4(position, 1.0);
+        worldPosition.xyz += aSwayVec * sin(uTime * aSwayT.x + aSwayT.y);
+        vec3 transformedNormal = normalMatrix * objN;
 
-        vec4 mvPosition = viewMatrix * world;
+        vec4 mvPosition = viewMatrix * worldPosition;
         gl_Position = projectionMatrix * mvPosition;
+        #include <shadowmap_vertex>
         #include <fog_vertex>
       }`,
-  fragmentShader: /* glsl */`
-    #include <common>
-    #include <fog_pars_fragment>
-    uniform vec3 dark, light;
-    varying vec2 vUv;
-    varying vec3 vN;
-    void main() {
-      // light falls from the upper right, as in every scroll ever painted
-      float lam = clamp(dot(normalize(vN), normalize(vec3(0.62, 0.72, 0.32))), 0.0, 1.0);
-      vec3 col = mix(dark, light, pow(lam, 0.85));
-      col = mix(col, dark, vUv.y * 0.22);   // tip darkens slightly
-      gl_FragColor = vec4(col, 1.0);
-      #include <fog_fragment>
-    }`,
+    fragmentShader: /* glsl */`
+      #include <common>
+      #include <fog_pars_fragment>
+      ${SHADOW_PARS_FRAG}
+      ${LIGHT_GLSL}
+      uniform vec3  dark, light;
+      uniform float translucency;
+      varying vec2 vUv;
+      varying vec3 vWN;
+      void main() {
+        vec3 N = normalize(vWN);
+        N = gl_FrontFacing ? N : -N;
+        vec3  albedo = mix(light, dark, vUv.y * 0.35);   // tips darken
+        float sh     = getShadowMask();
+        vec3  col    = shadeLit(albedo, N, sh, 1.0);
+        // a blade is thin enough for the sun to come through from behind
+        col += albedo * sunColor * max(dot(-N, sunDir), 0.0) * translucency * sh;
+        gl_FragColor = vec4(col, 1.0);
+        #include <fog_fragment>
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
   });
   inkMats.push(m);
   return m;
@@ -860,15 +1165,37 @@ function buildMesh(geo, mat, data) {
   geo.setAttribute('aSwayVec', new THREE.InstancedBufferAttribute(sway, 3));
   geo.setAttribute('aSwayT',   new THREE.InstancedBufferAttribute(time, 2));
   mesh.frustumCulled = false;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
   scene.add(mesh);
   return mesh;
 }
 
-buildMesh(stalkGeo,  inkMat('#1e2f26', '#4d6549'), segD);
-buildMesh(ringGeo,   inkMat('#1a2619', '#33452c'), ringD);
-buildMesh(branchGeo, inkMat('#1b2a1c', '#3a5033'), branchD);
-buildMesh(leafGeo,   inkMat('#2b3a28', '#576d4a'), leafD);
+buildMesh(stalkGeo,  inkMat('#1a2620', '#3f5238'), segD);
+buildMesh(ringGeo,   inkMat('#161f14', '#2b3824'), ringD);
+buildMesh(branchGeo, inkMat('#18231a', '#33452f'), branchD);
+buildMesh(leafGeo,   inkMat('#223020', '#46583a', 0.45), leafD);
 console.log(`bamboo:  culms · ${branchD.length} branches · ${leafD.length} leaves`);
+
+/* Contact occlusion for the grove: the ground's ambient darkens around each
+   culm's foot, so bamboo stands in the earth instead of on top of it. Folded
+   into the terrain's baked AO — no extra cost at runtime. */
+{
+  const W1 = SEG + 1, R = 2.6;
+  for (const st of stalks) {
+    const cx = (st.x + TW / 2) / CELL_X, cy = (TD / 2 + st.z) / CELL_Y;
+    const rx = Math.ceil(R / CELL_X), ry = Math.ceil(R / CELL_Y);
+    for (let iy = Math.floor(cy) - ry; iy <= Math.ceil(cy) + ry; iy++) {
+      for (let ix = Math.floor(cx) - rx; ix <= Math.ceil(cx) + rx; ix++) {
+        if (ix < 0 || iy < 0 || ix > SEG || iy > SEG) continue;
+        const d = Math.hypot((ix - cx) * CELL_X, (iy - cy) * CELL_Y);
+        if (d > R) continue;
+        terrainAO[iy * W1 + ix] *= 1 - 0.32 * (1 - d / R) ** 2;
+      }
+    }
+  }
+  tGeo.attributes.aAO.needsUpdate = true;
+}
 
 /* ══════════════════════════════════════════════════════════════
    MIST — the white that separates one range from the next
@@ -892,7 +1219,7 @@ const mists = [];
 for (let i = 0; i < 26; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    opacity: 0.10 + rnd() * 0.20, color: PAPER,
+    opacity: 0.10 + rnd() * 0.20, color: SKY,
   }));
   const z = -26 - rnd() * 165;
   sp.position.set((rnd() - 0.5) * 200, 1.4 + rnd() * 16, z);
@@ -907,7 +1234,7 @@ for (let i = 0; i < 26; i++) {
 for (let i = 0; i < 12; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    opacity: 0.16 + rnd() * 0.20, color: PAPER,
+    opacity: 0.16 + rnd() * 0.20, color: SKY,
   }));
   sp.position.set(
     FALL_CX + (rnd() - 0.5) * 18,
@@ -1047,6 +1374,7 @@ function frame() {
     camera.lookAt(look);
   }
 
+  sky.position.copy(camera.position);
   water.material.uniforms.uTime.value = t;
   for (const f of fallLayers) f.material.uniforms.uTime.value = t;
   for (const m of inkMats) m.uniforms.uTime.value = t;
