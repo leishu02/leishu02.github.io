@@ -113,8 +113,8 @@ section { padding: 40px 0; }
     overflow: hidden;
     text-align: center;
     padding: 72px 24px 56px;
-    /* Stays as the fallback when the scene can't run — reduced motion, no WebGL */
-    background: url('../../images/bamboo-bg.webp') center/cover no-repeat;
+    /* Plain paper when the scene can't run — reduced motion, no WebGL */
+    background: var(--bg);
     border-bottom: 1px solid var(--line);
 }
 .hero > * {
