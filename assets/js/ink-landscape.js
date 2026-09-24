@@ -73,6 +73,8 @@ const LIGHTING = {
   sunColor:  { value: new THREE.Color(1.00, 0.95, 0.88).multiplyScalar(2.1) },
   skyAmb:    { value: new THREE.Color(0.74, 0.81, 0.86) },
   groundAmb: { value: new THREE.Color(0.30, 0.31, 0.28) },
+  mistTime:  { value: 0 },
+  mistCol:   { value: SKY.clone().multiplyScalar(0.80) },
 };
 const LIGHT_GLSL = /* glsl */`
   uniform vec3 sunDir, sunColor, skyAmb, groundAmb;
@@ -123,6 +125,30 @@ const NOISE_GLSL = /* glsl */`
     float det = dot(dpdx, r1);
     vec3 grad = sign(det) * (dhdx * r1 + dhdy * r2);
     return normalize(abs(det) * N - strength * grad);
+  }`;
+
+/* Valley mist. Dense at the water and thinning with height, so it lies in the
+   gorge instead of hanging evenly over everything the way distance fog does.
+   The exponential height falloff is integrated exactly along the view ray,
+   then a slow noise field breaks it into drifting banks. Needs NOISE_GLSL. */
+const MIST_GLSL = /* glsl */`
+  uniform float mistTime;
+  uniform vec3  mistCol;
+  vec3 applyMist(vec3 col, vec3 wp) {
+    vec3  d  = wp - cameraPosition;
+    float t  = length(d);
+    float ry = d.y / max(t, 1e-4);
+    ry = abs(ry) < 1e-3 ? 1e-3 : ry;
+    const float A = 0.011;     // density at the waterline
+    const float B = 0.21;      // thins by e every ~4.8 units of height
+    float f = (A / B) * exp(-B * cameraPosition.y) * (1.0 - exp(-t * ry * B)) / ry;
+    vec2  q = wp.xz * 0.035 + vec2(mistTime * 0.020, mistTime * 0.008);
+    float bank = noise3(vec3(q, mistTime * 0.015)) * 0.65
+               + noise3(vec3(q * 2.3, 1.7 + mistTime * 0.02)) * 0.35;
+    // contrast the field so there are clear lanes between banks — an even
+    // veil reads as haze, not as mist moving through a gorge
+    f *= 0.12 + 1.8 * smoothstep(0.28, 0.74, bank);
+    return mix(col, mistCol, 1.0 - exp(-f));
   }`;
 
 // Materials that receive the sun's shadow need three's light uniforms merged in;
@@ -294,6 +320,7 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
     ${SHADOW_PARS_FRAG}
     ${LIGHT_GLSL}
     ${NOISE_GLSL}
+    ${MIST_GLSL}
     uniform float fallTop, fallBot, fallH;
     varying float vAO;
     varying vec3  vWorld, vWN;
@@ -350,7 +377,7 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       albedo *= mix(0.52, 1.0, smoothstep(0.0, 1.8, above));
 
       vec3 col = shadeLit(albedo, N, getShadowMask(), vAO);
-      gl_FragColor = vec4(col, 1.0);
+      gl_FragColor = vec4(applyMist(col, vWorld), 1.0);
       #include <fog_fragment>
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
@@ -463,6 +490,8 @@ const water = new THREE.Mesh(
       #include <fog_pars_fragment>
       ${SHADOW_PARS_FRAG}
       ${LIGHT_GLSL}
+      ${NOISE_GLSL}
+      ${MIST_GLSL}
       uniform vec3 water, paper, wallCol;
       uniform float uTime, fallBot, fallCx, fallHalfW, fallH;
       varying vec3  vWorld;
@@ -581,7 +610,7 @@ const water = new THREE.Mesh(
 
         // the pool's upstream edge fades over its last metre rather than
         // stopping on a straight line under the falls
-        gl_FragColor = vec4(col, 0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
+        gl_FragColor = vec4(applyMist(col, vWorld), 0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -701,6 +730,8 @@ const falls = new THREE.Mesh(
       uLip:       { value: U_LIP },
       uPhase:     { value: 0 },
       uDim:       { value: 1 },
+      mistTime:   LIGHTING.mistTime,   // shared, so one clock drives every surface
+      mistCol:    LIGHTING.mistCol,
       fogColor:   { value: scene.fog.color },
       fogDensity: { value: scene.fog.density },
     },
@@ -708,9 +739,10 @@ const falls = new THREE.Mesh(
       #include <common>
       #include <fog_pars_vertex>
       varying vec2 vUv;
-      varying vec3 vN, vV;
+      varying vec3 vN, vV, vMistPos;
       void main() {
         vUv = uv;
+        vMistPos = (modelMatrix * vec4(position, 1.0)).xyz;
         vN = normalize(normalMatrix * normal);
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
         vV = -mvPosition.xyz;
@@ -721,10 +753,11 @@ const falls = new THREE.Mesh(
       #include <common>
       #include <fog_pars_fragment>
       ${NOISE_GLSL}
+      ${MIST_GLSL}
       uniform float uTime, uPool, uLip, uPhase, uDim;
       uniform vec3  paper;
       varying vec2  vUv;
-      varying vec3  vN, vV;
+      varying vec3  vN, vV, vMistPos;
 
       // one vertical strand — edges kept tight so dark rock shows between falls
       float ribbon(float x, float c, float w) {
@@ -842,7 +875,7 @@ const falls = new THREE.Mesh(
         vec3 col = mix(paper * 0.22, paper * 0.72, clamp(m * 1.12 + silver, 0.0, 1.0));
         col = mix(col, paper * 1.0, clamp(foam, 0.0, 1.0));
         col += paper * vec3(0.05, 0.06, 0.07) * silver;   // the metallic edge of the flare
-        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));
+        gl_FragColor = vec4(applyMist(col, vMistPos), clamp(a, 0.0, 1.0));
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -906,7 +939,7 @@ const inkMat = (dark, light, translucency = 0) => {
       attribute vec2 aSwayT;     // (speed, phase)
       attribute vec2 aStalk;     // (base y, height) of the culm this part belongs to
       varying vec2 vUv;
-      varying vec3 vWN;
+      varying vec3 vWN, vMistPos;
       void main() {
         vUv = uv;
         vec3 objN = normalize(mat3(instanceMatrix) * normal);
@@ -918,6 +951,7 @@ const inkMat = (dark, light, translucency = 0) => {
         float hf = clamp((worldPosition.y - aStalk.x) / aStalk.y, 0.0, 1.3);
         worldPosition.xyz += aSwayVec * (hf * hf) * sin(uTime * aSwayT.x + aSwayT.y);
         vec3 transformedNormal = normalMatrix * objN;
+        vMistPos = worldPosition.xyz;
 
         vec4 mvPosition = viewMatrix * worldPosition;
         gl_Position = projectionMatrix * mvPosition;
@@ -929,10 +963,12 @@ const inkMat = (dark, light, translucency = 0) => {
       #include <fog_pars_fragment>
       ${SHADOW_PARS_FRAG}
       ${LIGHT_GLSL}
+      ${NOISE_GLSL}
+      ${MIST_GLSL}
       uniform vec3  dark, light;
       uniform float translucency;
       varying vec2 vUv;
-      varying vec3 vWN;
+      varying vec3 vWN, vMistPos;
       void main() {
         vec3 N = normalize(vWN);
         N = gl_FrontFacing ? N : -N;
@@ -941,7 +977,7 @@ const inkMat = (dark, light, translucency = 0) => {
         vec3  col    = shadeLit(albedo, N, sh, 1.0);
         // a blade is thin enough for the sun to come through from behind
         col += albedo * sunColor * max(dot(-N, sunDir), 0.0) * translucency * sh;
-        gl_FragColor = vec4(col, 1.0);
+        gl_FragColor = vec4(applyMist(col, vMistPos), 1.0);
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1394,6 +1430,7 @@ function frame() {
   water.material.uniforms.uTime.value = t;
   for (const f of fallLayers) f.material.uniforms.uTime.value = t;
   for (const m of inkMats) m.uniforms.uTime.value = t;
+  if (!reduceMotion) LIGHTING.mistTime.value = t;
 
   for (const m of mists) {
     m.position.x += m.userData.sp * 0.016;
