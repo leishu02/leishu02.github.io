@@ -1134,7 +1134,8 @@ for (let s = 0; s < stalks.length; s++) {
     for (let b = 0; b < nb; b++) {
       const crown = top && b >= nb - 2;
       const bi = branchPlan.length;
-      const bLen = st.h * (0.06 + rnd() * 0.09);
+      // short twigs: the leaves, not bare wood, should carry the silhouette
+      const bLen = st.h * (0.028 + rnd() * 0.040);
       branchPlan.push({
         // never above the culm's own tip: the top node sat at exactly 1.0 and
         // the jitter pushed its sprays into thin air
@@ -1154,12 +1155,13 @@ for (let s = 0; s < stalks.length; s++) {
       // Two or three fans per branch, out along its outer half.
       const nFans = 2 + Math.floor(rnd() * (1 + near));
       for (let k = 0; k < nFans; k++) {
-        const at  = Math.min(0.50 + (k + rnd() * 0.5) / nFans * 0.50, 1.0);
+        const at  = Math.min(0.35 + (k + rnd() * 0.5) / nFans * 0.65, 1.0);
         const nl  = 3 + Math.floor(rnd() * (1.5 + near * 2.5));
         const fanSide = rnd() < 0.5 ? -1 : 1;
         const lean0   = fanSide * (0.20 + rnd() * 0.30);
         for (let l = 0; l < nl; l++) {
-          const len = bLen * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
+          // leaf size set by the culm, not by the now much shorter twig
+          const len = st.h * 0.10 * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
           // blades open like fingers from one point, the middle ones longest
           const u = nl > 1 ? l / (nl - 1) - 0.5 : 0;
           leafPlan.push({
