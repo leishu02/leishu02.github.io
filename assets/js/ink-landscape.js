@@ -31,7 +31,7 @@ let { w: VW, h: VH } = sizeOf();
 /* ══════════════════════════════════════════════════════════════
    Palette
    ══════════════════════════════════════════════════════════════ */
-const PAPER = new THREE.Color('#eef2f2');   // the page colour the hero has to meet
+const PAPER = new THREE.Color('#f1efe9');   // the page colour the hero has to meet
 
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Phones and small machines get the same scene with a lighter hand: fewer noise

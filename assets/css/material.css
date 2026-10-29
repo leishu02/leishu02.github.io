@@ -14,8 +14,8 @@
     --text-2:    #5f6368;  /* grey 700 */
     /* Page and rules carry the scene's own rice-paper tint so the hero doesn't
        sit on the page as a separate object; cards stay clean white to lift. */
-    --line:      #d7dfde;
-    --bg:        #eef2f2;  /* the paper colour the 3D scene clears to */
+    --line:      #dcd8cf;
+    --bg:        #f1efe9;  /* the paper colour the 3D scene clears to: warm rice paper */
     --surface:   #ffffff;
 
     --radius:    12px;
@@ -86,7 +86,7 @@ a:hover { text-decoration: underline; }
     border-radius: 999px;
     transition: background .15s, color .15s;
 }
-.nav a:hover { background: #e6ecec; color: var(--text); text-decoration: none; }
+.nav a:hover { background: #e9e5dd; color: var(--text); text-decoration: none; }
 .nav a.active { color: var(--g-blue); background: #e8f0fe; }
 
 /* ---------- Layout ---------- */
@@ -147,9 +147,9 @@ section { padding: 40px 0; }
     pointer-events: none;
     /* Tight to the text column, so the falls stays in the clear beside it */
     background: radial-gradient(38% 56% at 50% 52%,
-                rgba(238, 242, 242, .68) 0%,
-                rgba(238, 242, 242, .42) 52%,
-                rgba(238, 242, 242, 0) 84%);
+                rgba(241, 239, 233, .68) 0%,
+                rgba(241, 239, 233, .42) 52%,
+                rgba(241, 239, 233, 0) 84%);
 }
 .hero img.avatar {
     width: 152px; height: 152px;
@@ -174,7 +174,7 @@ section { padding: 40px 0; }
 .chip {
     font-size: 13px; font-weight: 500;
     color: var(--text-2);
-    background: #e6ecec;
+    background: #e9e5dd;
     padding: 6px 14px;
     border-radius: 999px;
 }
@@ -229,7 +229,7 @@ section { padding: 40px 0; }
 }
 .pub-year:first-of-type { margin-top: 0; }
 .pubs { list-style: none; margin: 0 0 4px; padding: 0; }
-.pubs > li { padding: 14px 0; border-bottom: 1px solid #e8eded; }
+.pubs > li { padding: 14px 0; border-bottom: 1px solid #ebe7e0; }
 .pubs > li:last-child { border-bottom: none; }
 .pubs .title { font-weight: 500; color: var(--text); }
 .pubs .authors { color: var(--text-2); font-size: 14.5px; }
@@ -237,7 +237,7 @@ section { padding: 40px 0; }
 .pubs .me { font-weight: 700; color: var(--text); }
 .pubs .links { margin-left: 6px; }
 .pubs .links a { font-size: 13px; }
-.tag-award { color: var(--g-red); font-weight: 500; font-size: 13.5px; }
+.tag-award { color: #8f6416; font-weight: 500; font-size: 13.5px; }
 
 /* ---------- Footer ---------- */
 footer {
