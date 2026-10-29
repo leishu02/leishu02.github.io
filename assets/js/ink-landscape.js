@@ -180,11 +180,13 @@ function vnoise(x, y) {
   const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1);
   return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
 }
-function ridged(x, y, oct = 5) {
+// `soft` rounds the crease each octave folds along (a smooth |n|), which is
+// what turns a knife-edge ridge into a rounded shoulder
+function ridged(x, y, oct = 5, soft = 0) {
   let sum = 0, amp = 0.5, f = 1, norm = 0;
   for (let i = 0; i < oct; i++) {
     let n = vnoise(x * f, y * f) * 2 - 1;
-    n = 1 - Math.abs(n); n *= n;
+    n = 1 - Math.sqrt(n * n + soft); n *= n;
     sum += n * amp; norm += amp;
     amp *= 0.5; f *= 2.03;
   }
@@ -230,8 +232,10 @@ function terrainHeight(x, z) {
   const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
-  let h = ridged(x * 0.0115, z * 0.0115, 5);
-  h = Math.pow(h, 1.45) * 30 * valley * far;
+  // the distant ranges round off into ink-wash shoulders; the gorge keeps its edges
+  const distant = sstep(-60, -170, z);
+  let h = ridged(x * 0.0115, z * 0.0115, 5, 0.09 * distant);
+  h = Math.pow(h, 1.45 - 0.35 * distant) * 30 * valley * far;
   h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
   // A deterministic shoulder as well as the noise. Relying on noise alone
   // leaves dips that fall under the waterline far from the channel, so the
