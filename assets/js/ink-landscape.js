@@ -8,7 +8,10 @@
 import * as THREE from 'three';
 import { OrbitControls } from './three/OrbitControls.js';
 
-export function mountInkLandscape({ canvas, interactive = false, panX = 0 }) {
+export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0 }) {
+// turnX turns only the gaze, from where the eye already stands: the falls
+// slides further aside and the cliff beyond it comes to stand behind the
+// text. Moving the eye that far instead parks it inside the right bank.
 // panX swings the aim sideways without moving the eye, so the falls lands off
 // to one side of the frame — room for a column of text that would otherwise
 // sit right on top of it.
@@ -70,7 +73,7 @@ scene.fog    = new THREE.FogExp2(SKY, 0.0036);
 const SUN_DIR = new THREE.Vector3(0.55, 0.62, 0.35).normalize();
 const LIGHTING = {
   sunDir:    { value: SUN_DIR },
-  sunColor:  { value: new THREE.Color(1.00, 0.95, 0.88).multiplyScalar(2.1) },
+  sunColor:  { value: new THREE.Color(1.00, 0.93, 0.82).multiplyScalar(2.1) },
   skyAmb:    { value: new THREE.Color(0.74, 0.81, 0.86) },
   groundAmb: { value: new THREE.Color(0.30, 0.31, 0.28) },
   mistTime:  { value: 0 },
@@ -201,6 +204,12 @@ const bedAt = z => FALL_H * (1 - sstep(FALL_TOP, FALL_BOT, z));
 
 const LIP_CX = riverX(FALL_TOP - 0.5);
 
+/* Below the pool the reach swings in an S on its way to the eye instead of
+   running straight out of frame. Zero at the falls, so the lip and the
+   curtain's measured width are untouched. Mirrored in the water shader. */
+const bend = z => sstep(-40, -18, z) * Math.sin((z + 40) * 0.105) * 6.5;
+const channelX = z => riverX(z) + bend(z);
+
 function terrainHeight(x, z) {
   // A fall excavates a basin wider than itself, and that basin sits under the
   // lip — not on the meander line, which has already wandered off by the time
@@ -215,7 +224,7 @@ function terrainHeight(x, z) {
   // widening and re-closing while the centreline was still sliding back.
   const ds = z - FALL_BOT;                          // >0 is downstream
   const basin = ds < 0 ? sstep(-12, 0, ds) : 1 - sstep(0, 90, ds);
-  const cx = riverX(z) + (LIP_CX - riverX(z)) * basin;
+  const cx = riverX(z) + (LIP_CX - riverX(z)) * basin + bend(z);
   const d = Math.abs(x - cx);
   const inner = 8 + 6 * basin;
   const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
@@ -573,7 +582,7 @@ const water = new THREE.Mesh(
 
         // a sun glint on facets that tip toward it
         vec3  Hh   = normalize(sunDir + V);
-        col += sunColor * pow(max(dot(n, Hh), 0.0), 180.0) * 0.35 * getShadowMask();
+        col += sunColor * vec3(1.0, 0.90, 0.66) * pow(max(dot(n, Hh), 0.0), 120.0) * 0.45 * getShadowMask();
 
         // Foam leaves the plunge and is carried downstream — a wake, not a halo,
         // so it must be one-sided about the basin and drawn out along the flow.
@@ -597,7 +606,8 @@ const water = new THREE.Mesh(
         float rx  = sin(p.y * 0.015) * 4.5 + sin(p.y * 0.0055) * 3.0;
         float bas = ds < 0.0 ? smoothstep(-12.0, 0.0, ds)
                              : 1.0 - smoothstep(0.0, 90.0, ds);
-        float cxr = mix(rx, fallCx, bas);
+        float cxr = mix(rx, fallCx, bas)
+                  + smoothstep(-40.0, -18.0, p.y) * sin((p.y + 40.0) * 0.105) * 6.5;
         float dw  = abs(p.x - cxr);
         float hw  = 8.0 + 6.0 * bas + 3.5;        // where the wet edge falls
         float shallow = smoothstep(hw - 8.0, hw, dw);
@@ -1026,7 +1036,7 @@ function addStalk(x, z, h, r) {
   // bamboo grows on the bank, never in the stream — clear of both the local
   // waterline (which steps up above the falls) and the channel itself
   if (ground < bedAt(z) + 1.1) return;
-  if (Math.abs(x - riverX(z)) < 9.5) return;
+  if (Math.abs(x - channelX(z)) < 9.5) return;
   stalks.push({
     x, z,
     base: ground - 0.4,
@@ -1045,7 +1055,7 @@ function addStalk(x, z, h, r) {
 for (let c = 0; c < 34; c++) {
   const z    = 6 - Math.pow(rnd(), 0.55) * 150;
   const side = rnd() < 0.5 ? -1 : 1;
-  const cx   = riverX(z) + side * (11 + rnd() * 20);
+  const cx   = channelX(z) + side * (11 + rnd() * 20);
   const n    = 3 + Math.floor(rnd() * 4);
   for (let i = 0; i < n; i++) {
     const x  = cx + (rnd() - 0.5) * 6;
@@ -1058,7 +1068,7 @@ for (let c = 0; c < 34; c++) {
 for (const side of [-1, 1]) {
   for (let i = 0; i < 6; i++) {
     const z = -6 - rnd() * 22;
-    addStalk(riverX(z) + side * (13 + rnd() * 9), z, 13 + rnd() * 9, 0.18 + rnd() * 0.09);
+    addStalk(channelX(z) + side * (13 + rnd() * 9), z, 13 + rnd() * 9, 0.18 + rnd() * 0.09);
   }
 }
 
@@ -1527,7 +1537,7 @@ const io = 'IntersectionObserver' in window
 if (io) io.observe(canvas);
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(FALL_CX + panX, 19, FALL_BOT - 4);
+const look = new THREE.Vector3(FALL_CX + panX + turnX, 19, FALL_BOT - 4);
 const clock = new THREE.Clock();
 
 function frame() {

@@ -147,8 +147,8 @@ section { padding: 40px 0; }
     pointer-events: none;
     /* Tight to the text column, so the falls stays in the clear beside it */
     background: radial-gradient(38% 56% at 50% 52%,
-                rgba(238, 242, 242, .80) 0%,
-                rgba(238, 242, 242, .52) 52%,
+                rgba(238, 242, 242, .68) 0%,
+                rgba(238, 242, 242, .42) 52%,
                 rgba(238, 242, 242, 0) 84%);
 }
 .hero img.avatar {
