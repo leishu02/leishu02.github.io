@@ -335,3 +335,33 @@ footer {
     color: var(--text-2);
     font-size: 14px;
 }
+
+
+/* ---------- Demo video previews ---------- */
+.demo-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; }
+.demo { flex: 0 1 206px; min-width: 0; text-decoration: none; }
+.demo-shot { position: relative; display: block; }
+.demo-shot img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #000;
+}
+/* Play badge, so a still frame reads as something you can start. */
+.demo-shot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: center / 42px 42px no-repeat
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='21' fill='%23fff' opacity='.92'/%3E%3Cpath d='M27 22l16 10-16 10z' fill='%23202124'/%3E%3C/svg%3E");
+    transition: opacity .18s ease;
+}
+.demo:hover .demo-shot::after { opacity: .78; }
+.demo-label { display: block; margin-top: 7px; font-size: 13.5px; color: var(--text-2); }
+.demo:hover .demo-label { color: var(--g-blue); }
+@media (max-width: 600px) {
+    .demo { flex: 1 1 100%; max-width: 320px; }
+}
