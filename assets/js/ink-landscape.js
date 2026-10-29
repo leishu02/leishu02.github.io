@@ -419,19 +419,40 @@ scene.add(terrain);
    frame it is "locked" by stone, so the river turns away behind rock instead
    of running straight out of the corner. Real meshes in the terrain's own
    material: carved from the height field they came out as faceted cones. */
+/* A finely divided sphere with shared vertices. IcosahedronGeometry comes
+   unindexed — every face owns its corners — so its normals stay per face and
+   the stone shades as flat facets however finely it is divided. */
+function boulderSphere() {
+  const src = new THREE.IcosahedronGeometry(1, 18).attributes.position;
+  const pos = [], idx = [], seen = new Map();
+  for (let i = 0; i < src.count; i++) {
+    const x = src.getX(i), y = src.getY(i), z = src.getZ(i);
+    const key = `${x.toFixed(4)},${y.toFixed(4)},${z.toFixed(4)}`;
+    let j = seen.get(key);
+    if (j === undefined) { j = pos.length / 3; seen.set(key, j); pos.push(x, y, z); }
+    idx.push(j);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  return g;
+}
+
 if (turnX > 0) {
   // (x, z, radius, height, yaw)
   for (const [bx, bz, br, bh, yaw] of [[1.5, -5, 4.0, 3.6, 0.6], [-6.5, -11, 3.0, 2.6, 2.1], [5.5, -1, 2.1, 1.5, 4.0]]) {
-    const g = new THREE.IcosahedronGeometry(1, 4);
+    const g = boulderSphere();
     const p = g.attributes.position, ao = new Float32Array(p.count);
     for (let i = 0; i < p.count; i++) {
       let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
-      // weathered lumps, a flatter crown, and a base that spreads into the bed
+      // weathered lumps over three scales, a rounded-off crown, and a base
+      // that spreads into the bed
       const k = 1 + 0.22 * (vnoise(x * 1.9 + bx, z * 1.9 + y) - 0.5)
-                  + 0.10 * (vnoise(y * 3.7 + bz, x * 3.7) - 0.5);
+                  + 0.10 * (vnoise(y * 3.7 + bz, x * 3.7) - 0.5)
+                  + 0.045 * (vnoise(x * 7.3 + y * 3.1, z * 7.3 - bx) - 0.5);
       x *= k; z *= k * 0.82; y *= k;
-      if (y > 0.55) y = 0.55 + (y - 0.55) * 0.5;
-      if (y < 0) y *= 0.35;
+      if (y > 0) y *= 1 - 0.28 * y;
+      else y *= 0.35;
       p.setXYZ(i, x, y, z);
       ao[i] = 0.50 + 0.50 * sstep(-0.1, 0.7, y);
     }
