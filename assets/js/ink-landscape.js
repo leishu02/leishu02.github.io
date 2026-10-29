@@ -232,7 +232,10 @@ function terrainHeight(x, z) {
   const basin = ds < 0 ? sstep(-12, 0, ds) : 1 - sstep(0, 90, ds);
   const cx = riverX(z) + (LIP_CX - riverX(z)) * basin + bend(z);
   const d = Math.abs(x - cx);
-  const inner = 8 + 6 * basin + pond(z);
+  // the channel pinches in toward the lip, so the falls is a narrower, taller
+  // column; the pool below keeps its full width
+  const pinch = 1 - 0.36 * (1 - sstep(FALL_TOP - 1, FALL_BOT + 3, z));
+  const inner = (8 + 6 * basin) * pinch + pond(z);
   const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
@@ -412,6 +415,38 @@ terrain.receiveShadow = true;
 terrain.castShadow = true;
 scene.add(terrain);
 
+/* Boulders at the water-mouth, homepage only. Where the reach leaves the
+   frame it is "locked" by stone, so the river turns away behind rock instead
+   of running straight out of the corner. Real meshes in the terrain's own
+   material: carved from the height field they came out as faceted cones. */
+if (turnX > 0) {
+  // (x, z, radius, height, yaw)
+  for (const [bx, bz, br, bh, yaw] of [[1.5, -5, 4.0, 3.6, 0.6], [-6.5, -11, 3.0, 2.6, 2.1], [5.5, -1, 2.1, 1.5, 4.0]]) {
+    const g = new THREE.IcosahedronGeometry(1, 4);
+    const p = g.attributes.position, ao = new Float32Array(p.count);
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      // weathered lumps, a flatter crown, and a base that spreads into the bed
+      const k = 1 + 0.22 * (vnoise(x * 1.9 + bx, z * 1.9 + y) - 0.5)
+                  + 0.10 * (vnoise(y * 3.7 + bz, x * 3.7) - 0.5);
+      x *= k; z *= k * 0.82; y *= k;
+      if (y > 0.55) y = 0.55 + (y - 0.55) * 0.5;
+      if (y < 0) y *= 0.35;
+      p.setXYZ(i, x, y, z);
+      ao[i] = 0.50 + 0.50 * sstep(-0.1, 0.7, y);
+    }
+    g.setAttribute('aAO', new THREE.BufferAttribute(ao, 1));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, terrain.material);
+    const ground = Math.max(bedAt(bz) + 0.28, terrainHeight(bx, bz));
+    m.position.set(bx, ground - bh * 0.18, bz);
+    m.scale.set(br, bh, br);
+    m.rotation.y = yaw;
+    m.castShadow = m.receiveShadow = true;
+    scene.add(m);
+  }
+}
+
 /* ── the sun, as far as three is concerned ─────────────────────
    Only here to drive the shadow map; the shaders do their own lighting from
    SUN_DIR. Its orthographic shadow camera is framed on the gorge — the far
@@ -470,7 +505,7 @@ const water = new THREE.Mesh(
     uniforms: litUniforms({
       uTime:   { value: 0 },
       // a gorge pool is dark: nearly all of its brightness is reflected sky
-      water:   { value: new THREE.Color(0.030, 0.048, 0.052) },
+      water:   { value: new THREE.Color(0.018, 0.032, 0.040) },  // deep ink-blue
       paper:   { value: SKY },
       fallTop: { value: FALL_TOP },
       fallBot: { value: FALL_BOT },
@@ -582,16 +617,20 @@ const water = new THREE.Mesh(
         // wall until it rises high enough to clear the rim, then sky.
         vec3  R   = reflect(-V, n);
         float env = smoothstep(0.16, 0.55, R.y);
-        vec3  refl = mix(wallCol, paper * 0.94, env);
+        // the sky it mirrors is the mist-dimmed sky of a gorge: a still, dark
+        // pool, not a sheet of light
+        // paper is the HDR sky (several times white), so even a fraction of
+        // it mirrored at grazing angles was blowing the pool out to white
+        vec3  refl = mix(wallCol, paper * 0.15, env);
         if (R.z < -0.01) {
           float tHit = (-52.0 - vWorld.z) / R.z;          // the curtain's mid-depth
           vec3  hit  = vWorld + R * tHit;
           float onFalls = step(0.0, tHit)
                         * (1.0 - smoothstep(fallHalfW * 0.85, fallHalfW * 1.02, abs(hit.x - fallCx)))
                         * step(0.0, hit.y) * (1.0 - smoothstep(fallH * 0.92, fallH, hit.y));
-          refl = mix(refl, paper * 0.80, onFalls);
+          refl = mix(refl, paper * 0.20, onFalls);
         }
-        vec3 col  = mix(body, refl, F);
+        vec3 col  = mix(body, refl, F * 0.80);
         vec3 foamCol    = paper * 0.52;            // white water, a shade under the sky
         vec3 shallowCol = mix(body, vec3(0.16, 0.16, 0.14), 0.55);  // thin water over the bed
 
@@ -605,7 +644,7 @@ const water = new THREE.Mesh(
         float wake = smoothstep(-3.0, 1.5, ds) * (1.0 - smoothstep(2.0, 22.0, ds));
         // torn into streamers by the same lengthwise field as the rest of the river
         wake *= 0.55 + 0.45 * (0.5 + 0.5 * sin(p.x * 1.6 + r * 1.2));
-        col = mix(col, foamCol, wake * 0.30);
+        col = mix(col, foamCol, wake * 0.16);
 
         // The churn where the column actually strikes. Without it the pool
         // simply begins along a straight line in z and the seam is obvious.
@@ -627,7 +666,7 @@ const water = new THREE.Mesh(
         float pnd = 7.0 * exp(-pow((p.y + 37.0) / 10.0, 2.0)) * smoothstep(fallBot, fallBot + 5.0, p.y);
         float hw  = 8.0 + 6.0 * bas + pnd + 3.5;  // where the wet edge falls
         float shallow = smoothstep(hw - 8.0, hw, dw);
-        col = mix(col, shallowCol, shallow * 0.62);
+        col = mix(col, shallowCol, shallow * 0.45);
 
         // and a thread of light where the current parts around the margin
         col = mix(col, foamCol,
@@ -636,7 +675,10 @@ const water = new THREE.Mesh(
 
         // the pool's upstream edge fades over its last metre rather than
         // stopping on a straight line under the falls
-        gl_FragColor = vec4(applyMist(col, vWorld), 0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
+        // the valley mist is sampled a little above the surface: lying on the
+        // water at full strength it bleached the whole pool white
+        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.55),
+                            0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1501,7 +1543,7 @@ const spray = (() => {
       uHalfW:   { value: FALL_W / 2 },
       uViewH:   { value: 1 },
       uCol:     { value: SKY.clone().multiplyScalar(0.92) },
-      uOpacity: { value: 0.24 },
+      uOpacity: { value: 0.17 },
     }]),
     vertexShader: /* glsl */`
       #include <common>
