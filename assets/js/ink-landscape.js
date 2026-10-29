@@ -172,6 +172,17 @@ const SHADOW_PARS_FRAG = /* glsl */`
 const DEFINES = { OCTAVES: lowPower ? 3 : 5 };
 
 const camera = new THREE.PerspectiveCamera(40, VW / VH, 0.1, 700);
+/* Cap the horizontal field of view. On a very wide, short band (an ultrawide
+   monitor) a fixed 40° vertical view swept the frame out sideways until the
+   bank right beside the eye filled the edge as a dark slab. Past the hero's
+   designed shape the view narrows vertically instead of widening. */
+const MAX_TAN_H = 1.6;    // about 58° either side
+const fitFov = () => {
+  const a = camera.aspect;
+  camera.fov = Math.min(40, THREE.MathUtils.radToDeg(2 * Math.atan(MAX_TAN_H / a)));
+  camera.updateProjectionMatrix();
+};
+fitFov();
 camera.position.set(0, 5.2, 34);
 
 /* ── noise: value fbm + ridged multifractal ─────────────────── */
@@ -252,6 +263,13 @@ function terrainHeight(x, z) {
   // wet width becomes ragged and unmeasurable — and the curtain cannot be
   // matched to a width that is not well defined.
   h += valley * 3.2 * far;
+  // On the homepage the eye stands back on the bank, and the ground right
+  // beside it rose into frame on wide screens as a dark, flat-lit slab.
+  // Let the land settle low around where the eye stands.
+  if (turnX > 0) {
+    const d = Math.hypot(x - (LIP_CX + panX + 2.5), z - (34 + backZ));
+    h *= 0.2 + 0.8 * sstep(16, 48, d);
+  }
   return bedAt(z) + h;
 }
 
@@ -1520,8 +1538,11 @@ function placeMoon(eye, target) {
   const right = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
   const up = new THREE.Vector3().crossVectors(right, f);
   const D = 470;
+  // a fixed fraction of the frame, so the moon stays upper right in open sky
+  // at any aspect — narrow phones and wide monitors alike
+  const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * camera.aspect;
   moon.position.copy(eye).addScaledVector(f, D)
-    .addScaledVector(right, D * 0.62).addScaledVector(up, D * 0.27);
+    .addScaledVector(right, D * th * 0.70).addScaledVector(up, D * tv * 0.74);
   moon.scale.setScalar(D * 0.26);
 }
 
@@ -1704,7 +1725,8 @@ const ro = new ResizeObserver(() => {
   if (s.w === VW && s.h === VH) return;      // no-op resizes would loop
   VW = s.w; VH = s.h;
   camera.aspect = VW / VH;
-  camera.updateProjectionMatrix();
+  fitFov();
+  placeMoon(MOON_EYE, look);
   renderer.setSize(VW, VH, false);
   setSprayViewport();
 });
@@ -1720,7 +1742,8 @@ if (io) io.observe(canvas);
 /* ── loop ───────────────────────────────────────────────────── */
 const EYE_Y = 7.5 + liftY * 0.35;
 const look = new THREE.Vector3(FALL_CX + panX + turnX, 19 + liftY, FALL_BOT - 4);
-placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34 + backZ), look);
+const MOON_EYE = new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34 + backZ);
+placeMoon(MOON_EYE, look);
 const clock = new THREE.Clock();
 
 function frame() {
