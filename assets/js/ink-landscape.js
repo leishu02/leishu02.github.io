@@ -1084,6 +1084,15 @@ for (const side of [-1, 1]) {
   }
 }
 
+/* With the gaze turned (the homepage hero), the near right bank is bare grass
+   and the frame sits heavy on the falls side. A few tall culms close in on
+   that edge balance it, leaning into frame. Kept to a handful on purpose. */
+if (turnX > 0) {
+  for (const [dx, dz, h] of [[17, 6, 19], [14, 19, 22], [13.5, 0, 17]]) {
+    addStalk(sightX + dx, dz, h, 0.22);
+  }
+}
+
 /* No gorge-wall culms. Standing that close they read as dark slabs across the
    frame rather than as bamboo, and they were the one thing fighting the fall
    for the eye. The receding groves carry the setting on their own. */
