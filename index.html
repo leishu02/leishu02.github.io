@@ -258,14 +258,14 @@
     { "imports": { "three": "./assets/js/three.module.min.js" } }
     </script>
     <script type="module">
-        import { mountInkLandscape } from './assets/js/ink-landscape.js?v=20261030l';
+        import { mountInkLandscape } from './assets/js/ink-landscape.js?v=20261030n';
         const canvas = document.getElementById('hero-scene');
         // Leave the painted background in place on machines that would rather
         // not animate, and where WebGL is unavailable.
         if (canvas && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
             try {
                 // Aim right of the falls so it clears the centred text column
-                mountInkLandscape({ canvas, interactive: false, panX: 17, turnX: 10, liftY: 5, backZ: 16 });
+                mountInkLandscape({ canvas, interactive: false, panX: 17, turnX: 24, liftY: 5, backZ: 16 });
                 document.querySelector('.hero').classList.add('hero-live');
             } catch (e) {
                 console.warn('hero scene unavailable:', e);

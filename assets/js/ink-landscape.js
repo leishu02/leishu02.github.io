@@ -1111,9 +1111,18 @@ const rnd = () => { rs = (rs * 1664525 + 1013904223) >>> 0; return rs / 42949672
    grove yields instead, so the framing is free to move. */
 const sightX = FALL_CX + panX;
 const blocksView = (x, z) => z < 36 && z > -24 && Math.abs(x - sightX) < 7.5;
+/* On the homepage, keep the column behind the portrait and name clear of
+   culms at any distance: thin poles rising straight past the head read as
+   spikes, and the cliff behind the text should stand as one unbroken mass. */
+const behindName = (x, z) => {
+  if (turnX <= 0) return false;
+  const ex = FALL_CX + panX + 2.5, ez = 34 + backZ;
+  const a = Math.atan2(x - ex, ez - z), aim = Math.atan2(turnX - 2.5, ez - (FALL_BOT - 4));
+  return z < ez - 10 && Math.abs(a - aim) < 0.11;
+};
 
 function addStalk(x, z, h, r) {
-  if (blocksView(x, z)) return;
+  if (blocksView(x, z) || behindName(x, z)) return;
   const ground = terrainHeight(x, z);
   // bamboo grows on the bank, never in the stream — clear of both the local
   // waterline (which steps up above the falls) and the channel itself
