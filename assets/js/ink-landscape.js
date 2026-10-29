@@ -8,7 +8,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from './three/OrbitControls.js';
 
-export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0, liftY = 0 }) {
+export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0, liftY = 0, backZ = 0 }) {
+// backZ stands the eye further back down the valley, widening the frame.
 // liftY raises the eye a little and tips the gaze up by more, opening sky
 // above the ridgeline for the moon and the birds to sit apart in.
 // turnX turns only the gaze, from where the eye already stands: the falls
@@ -1700,7 +1701,7 @@ if (io) io.observe(canvas);
 /* ── loop ───────────────────────────────────────────────────── */
 const EYE_Y = 7.5 + liftY * 0.35;
 const look = new THREE.Vector3(FALL_CX + panX + turnX, 19 + liftY, FALL_BOT - 4);
-placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34), look);
+placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34 + backZ), look);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -1720,7 +1721,7 @@ function frame() {
     // the only ground the birds have to read against.
     camera.position.x = FALL_CX + panX + 2.5 + ptr.x * 4.0 + Math.sin(t * 0.10) * 1.3;
     camera.position.y = EYE_Y - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35;
-    camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
+    camera.position.z = 34 + backZ + Math.cos(t * 0.08) * 1.2;
     camera.lookAt(look);
   }
 
