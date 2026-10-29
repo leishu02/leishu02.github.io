@@ -8,7 +8,7 @@
     --g-red:    #ea4335;
     --g-yellow: #fbbc05;
     --g-green:  #34a853;
-    --ink-green: #2f4a35;  /* the bamboo's own green, dark enough to read as ink */
+    --ochre:     #8f6416;  /* ochre gold, like the gold-tinted seal paste on a painting */
 
     --text:      #202124;  /* grey 900 */
     --text-2:    #5f6368;  /* grey 700 */
@@ -68,10 +68,10 @@ a:hover { text-decoration: underline; }
 .brand .brand-en,
 .brand .brand-cn { white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-/* One ink green for 舒蕾, picked off the bamboo in the hero scene rather than
-   from the Google palette — the two characters are a name, not a logotype, and
+/* One ochre gold for 舒蕾, the colour of the seal on a painting, rather than
+   the Google palette — the two characters are a name, not a logotype, and
    colouring them separately broke them into unrelated marks. */
-.brand .brand-cn { color: var(--ink-green); }
+.brand .brand-cn { color: var(--ochre); }
 
 .nav {
     display: flex;
@@ -237,7 +237,7 @@ section { padding: 40px 0; }
 .pubs .me { font-weight: 700; color: var(--text); }
 .pubs .links { margin-left: 6px; }
 .pubs .links a { font-size: 13px; }
-.tag-award { color: #8f6416; font-weight: 500; font-size: 13.5px; }
+.tag-award { color: var(--ochre); font-weight: 500; font-size: 13.5px; }
 
 /* ---------- Footer ---------- */
 footer {
