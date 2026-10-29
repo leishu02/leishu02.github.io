@@ -1175,7 +1175,7 @@ for (const side of [-1, 1]) {
    and the frame sits heavy on the falls side. A few tall culms close in on
    that edge balance it, leaning into frame. Kept to a handful on purpose. */
 if (turnX > 0) {
-  for (const [dx, dz, h] of [[24, -4, 20], [21, -11, 18]]) {
+  for (const [dx, dz, h] of [[24, -4, 20], [21, -11, 18], [27, -8, 15], [22, 0, 13], [26.5, -14, 17]]) {
     addStalk(sightX + dx, dz, h, 0.19);
   }
 }
