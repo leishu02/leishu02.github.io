@@ -1114,15 +1114,23 @@ const blocksView = (x, z) => z < 36 && z > -24 && Math.abs(x - sightX) < 7.5;
 /* On the homepage, keep the column behind the portrait and name clear of
    culms at any distance: thin poles rising straight past the head read as
    spikes, and the cliff behind the text should stand as one unbroken mass. */
+/* On the homepage the groves on the falls side (the west, 白虎) massed along
+   the skyline into a comb taller and denser than anything on the east. Thin
+   the far ones there by half, by a position hash so no rnd() draws change. */
+const thinWestRidge = (x, z) => {
+  if (turnX <= 0 || z > -40 || x > channelX(z) - 10) return false;
+  const v = Math.sin(x * 39.3468 + z * 11.1351) * 24634.6345;
+  return v - Math.floor(v) < 0.5;
+};
 const behindName = (x, z) => {
   if (turnX <= 0) return false;
   const ex = FALL_CX + panX + 2.5, ez = 34 + backZ;
   const a = Math.atan2(x - ex, ez - z), aim = Math.atan2(turnX - 2.5, ez - (FALL_BOT - 4));
-  return z < ez - 10 && Math.abs(a - aim) < 0.11;
+  return z < ez - 10 && Math.abs(a - aim) < 0.17;
 };
 
 function addStalk(x, z, h, r) {
-  if (blocksView(x, z) || behindName(x, z)) return;
+  if (blocksView(x, z) || behindName(x, z) || thinWestRidge(x, z)) return;
   const ground = terrainHeight(x, z);
   // bamboo grows on the bank, never in the stream — clear of both the local
   // waterline (which steps up above the falls) and the channel itself
@@ -1177,8 +1185,8 @@ for (const side of [-1, 1]) {
 if (turnX > 0) {
   for (const [dx, dz, h] of [[24, -4, 20], [21, -11, 18], [27, -8, 15], [22, 0, 13], [26.5, -14, 17],
                                      // a small clump under the moon (月下竹影)
-                                     [49, 0, 18], [52, -4, 15], [46, 3, 16], [51.5, 4, 13]]) {
-    addStalk(sightX + dx, dz, h, 0.19);
+                                     [44, 6, 15], [50, -1, 19], [56, -6, 14], [53, 7, 12]]) {
+    addStalk(sightX + dx, dz, h, 0.16);
   }
 }
 
