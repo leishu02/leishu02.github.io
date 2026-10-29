@@ -1470,18 +1470,26 @@ for (let i = 0; i < 4; i++) {
    Placed in the frame of the opening view, then left fixed in the world, so
    it sits behind the ranges and they can cover its lower edge. */
 const moon = (() => {
+  // On a sky this pale a bright disc alone all but vanishes. The painter's
+  // answer is to wash the sky AROUND the moon a shade darker (烘云托月) so the
+  // untouched disc reads by contrast: a soft grey halo, then the white moon.
   const c = document.createElement('canvas');
-  c.width = c.height = 128;
+  c.width = c.height = 256;
   const g = c.getContext('2d');
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  grd.addColorStop(0.00, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.36, 'rgba(255,255,255,1)');
-  grd.addColorStop(0.42, 'rgba(255,255,255,0.22)');
-  grd.addColorStop(1.00, 'rgba(255,255,255,0)');
-  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const halo = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+  halo.addColorStop(0.00, 'rgba(100,104,108,0.85)');
+  halo.addColorStop(0.30, 'rgba(100,104,108,0.62)');
+  halo.addColorStop(0.62, 'rgba(100,104,108,0.22)');
+  halo.addColorStop(1.00, 'rgba(100,104,108,0)');
+  g.fillStyle = halo; g.fillRect(0, 0, 256, 256);
+  const disc = g.createRadialGradient(128, 128, 0, 128, 128, 34);
+  disc.addColorStop(0.00, 'rgba(255,255,255,1)');
+  disc.addColorStop(0.88, 'rgba(255,255,255,1)');
+  disc.addColorStop(1.00, 'rgba(255,255,255,0)');
+  g.fillStyle = disc; g.beginPath(); g.arc(128, 128, 34, 0, Math.PI * 2); g.fill();
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, fog: false,
-    color: SKY.clone().multiply(new THREE.Color(1.06, 1.0, 0.86)).multiplyScalar(1.6),
+    color: SKY.clone().multiply(new THREE.Color(1.06, 1.0, 0.88)).multiplyScalar(1.5),
   }));
   sp.renderOrder = -0.5;
   scene.add(sp);
@@ -1494,7 +1502,7 @@ function placeMoon(eye, target) {
   const D = 470;
   moon.position.copy(eye).addScaledVector(f, D)
     .addScaledVector(right, D * 0.62).addScaledVector(up, D * 0.27);
-  moon.scale.setScalar(D * 0.13);
+  moon.scale.setScalar(D * 0.26);
 }
 
 /* Birds — two strokes of the brush, nothing more */
