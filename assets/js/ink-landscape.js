@@ -1493,7 +1493,7 @@ function placeMoon(eye, target) {
   const up = new THREE.Vector3().crossVectors(right, f);
   const D = 470;
   moon.position.copy(eye).addScaledVector(f, D)
-    .addScaledVector(right, D * 0.42).addScaledVector(up, D * 0.29);
+    .addScaledVector(right, D * 0.62).addScaledVector(up, D * 0.27);
   moon.scale.setScalar(D * 0.13);
 }
 
