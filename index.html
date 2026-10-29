@@ -233,6 +233,25 @@
         })();
     </script>
 
+    <script>
+        // Some previews use a #t= fragment to choose the frame shown before play.
+        // That also makes playback *start* there, which is not what we want: the
+        // frame is a cover, the film should still run from the beginning. Rewind
+        // once, on the first play, and only if the viewer has not scrubbed.
+        (function () {
+            Array.prototype.forEach.call(document.querySelectorAll('video[src*="#t="]'), function (v) {
+                var m = /#t=([\d.]+)/.exec(v.getAttribute('src'));
+                if (!m) return;
+                var cover = parseFloat(m[1]), done = false;
+                v.addEventListener('play', function () {
+                    if (done) return;
+                    done = true;
+                    if (Math.abs(v.currentTime - cover) < 0.6) v.currentTime = 0;
+                });
+            });
+        })();
+    </script>
+
     <!-- Hero scene. Non-interactive here so the wheel keeps scrolling the page;
          the standalone version at /shanshui.html can be orbited and zoomed. -->
     <script type="importmap">
