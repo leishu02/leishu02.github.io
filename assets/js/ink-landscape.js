@@ -8,7 +8,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from './three/OrbitControls.js';
 
-export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0 }) {
+export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0, liftY = 0 }) {
+// liftY raises the eye a little and tips the gaze up by more, opening sky
+// above the ridgeline for the moon and the birds to sit apart in.
 // turnX turns only the gaze, from where the eye already stands: the falls
 // slides further aside and the cliff beyond it comes to stand behind the
 // text. Moving the eye that far instead parks it inside the right bank.
@@ -1491,7 +1493,7 @@ function placeMoon(eye, target) {
   const up = new THREE.Vector3().crossVectors(right, f);
   const D = 470;
   moon.position.copy(eye).addScaledVector(f, D)
-    .addScaledVector(right, D * -0.25).addScaledVector(up, D * 0.29);
+    .addScaledVector(right, D * 0.42).addScaledVector(up, D * 0.29);
   moon.scale.setScalar(D * 0.13);
 }
 
@@ -1688,8 +1690,9 @@ const io = 'IntersectionObserver' in window
 if (io) io.observe(canvas);
 
 /* ── loop ───────────────────────────────────────────────────── */
-const look = new THREE.Vector3(FALL_CX + panX + turnX, 19, FALL_BOT - 4);
-placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, 7.5, 34), look);
+const EYE_Y = 7.5 + liftY * 0.35;
+const look = new THREE.Vector3(FALL_CX + panX + turnX, 19 + liftY, FALL_BOT - 4);
+placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34), look);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -1708,7 +1711,7 @@ function frame() {
     // Low and looking up: it puts the sky above the gorge in frame, which is
     // the only ground the birds have to read against.
     camera.position.x = FALL_CX + panX + 2.5 + ptr.x * 4.0 + Math.sin(t * 0.10) * 1.3;
-    camera.position.y = 7.5 - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35;
+    camera.position.y = EYE_Y - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35;
     camera.position.z = 34 + Math.cos(t * 0.08) * 1.2;
     camera.lookAt(look);
   }
