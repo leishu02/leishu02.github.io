@@ -1577,8 +1577,12 @@ if (interactive) {
 const ptr = { x: 0, y: 0 }, aim = { x: 0, y: 0 };
 const onPointer = e => {
   const r = canvas.getBoundingClientRect();
-  aim.x = ((e.clientX - r.left) / r.width) * 2 - 1;
-  aim.y = ((e.clientY - r.top) / r.height) * 2 - 1;
+  // Clamped: the listener is on the window, so once the page scrolls the
+  // pointer can sit far below the hero, and an unclamped aim drove the eye
+  // down through the water and under the terrain.
+  const cl = v => Math.min(1, Math.max(-1, v));
+  aim.x = cl(((e.clientX - r.left) / r.width) * 2 - 1);
+  aim.y = cl(((e.clientY - r.top) / r.height) * 2 - 1);
 };
 addEventListener('pointermove', onPointer);
 
