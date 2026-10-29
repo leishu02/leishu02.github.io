@@ -8,7 +8,9 @@
 import * as THREE from 'three';
 import { OrbitControls } from './three/OrbitControls.js';
 
-export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0, liftY = 0, backZ = 0 }) {
+export function mountInkLandscape({ canvas, interactive = false, panX = 0, turnX = 0, liftY = 0, backZ = 0, moonX = 0.70, moonY = 0.74, moonS = 1 }) {
+// moonX / moonY: the moon's place in the frame, as fractions of its half-width
+// and half-height (+ right / up); moonS scales its size. Rendered wallpapers move it; the hero keeps the default.
 // backZ stands the eye further back down the valley, widening the frame.
 // liftY raises the eye a little and tips the gaze up by more, opening sky
 // above the ridgeline for the moon and the birds to sit apart in.
@@ -1542,8 +1544,8 @@ function placeMoon(eye, target) {
   // at any aspect — narrow phones and wide monitors alike
   const tv = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)), th = tv * camera.aspect;
   moon.position.copy(eye).addScaledVector(f, D)
-    .addScaledVector(right, D * th * 0.70).addScaledVector(up, D * tv * 0.74);
-  moon.scale.setScalar(D * 0.26);
+    .addScaledVector(right, D * th * moonX).addScaledVector(up, D * tv * moonY);
+  moon.scale.setScalar(D * 0.26 * moonS);
 }
 
 /* Birds — two strokes of the brush, nothing more */
