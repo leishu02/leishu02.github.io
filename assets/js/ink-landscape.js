@@ -357,16 +357,20 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       float n1      = fbm3(p * 0.21);
       float warp    = fbm3(p * 0.045);
       float stratum = p.y * 0.17 + warp * 3.4 + fbm3(p * vec3(0.02, 0.0, 0.02)) * 2.0;
-      float bandW   = 0.18 + 0.30 * noise3(p * 0.07);            // ledge edges vary
+      // broad, rounded ledges: weathered and settled rather than freshly split
+      float bandW   = 0.32 + 0.34 * noise3(p * 0.07);            // ledge edges vary
       float ledge   = smoothstep(0.0, bandW, abs(fract(stratum) - 0.5) * 2.0);
       // Bedding only shows on near-vertical faces. On a moderate slope the same
       // horizontal planes cut shallowly and spread into contour-map bands.
       ledge = mix(0.6, ledge, smoothstep(0.42, 0.78, steep));
       // joints stretched along y so they run down the face, not round it
       float joint   = 1.0 - abs(noise3(p * vec3(0.22, 0.035, 0.22)) * 2.0 - 1.0);
-      float crack   = smoothstep(0.955, 0.995, joint) * smoothstep(0.35, 0.65, noise3(p * 0.05));
+      // few, faint joints: the face should read as one sound mass, not fractured
+      float crack   = smoothstep(0.975, 0.998, joint) * smoothstep(0.45, 0.75, noise3(p * 0.05));
       float grain   = detail > 0.0 ? fbm3(p * 1.35) : 0.5;
-      float rockH   = ledge * 0.50 + grain * 0.50 - crack * 0.7;
+      // a low, rounded swell under it all gives the face weight and body
+      float mass    = fbm3(p * 0.09);
+      float rockH   = ledge * 0.42 + grain * 0.22 + mass * 0.75;
 
       // Rock relief only where there is rock. On gentle ground the same field
       // drew contour-like squiggles; there it gets an isotropic grain instead.
@@ -375,8 +379,11 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       vec3  N = perturbNormal(p, Ng, bumpH, mix(0.12, 1.0, rockMask) * detail);
 
       // albedo, in linear light
-      vec3 rockCol = mix(vec3(0.090, 0.095, 0.098), vec3(0.185, 0.188, 0.186), n1);
-      rockCol *= (0.86 + 0.24 * ledge) * (1.0 - 0.35 * crack);
+      // Warm grey stone (earth) with paler, near-white patches (metal); a
+      // little ochre seeps along the bedding. No cold blue-black.
+      vec3 rockCol = mix(vec3(0.100, 0.095, 0.087), vec3(0.208, 0.200, 0.184), n1);
+      rockCol = mix(rockCol, rockCol * vec3(1.10, 1.02, 0.86), smoothstep(0.45, 0.80, warp) * 0.6);
+      rockCol *= (0.93 + 0.12 * ledge) * (1.0 - 0.10 * crack);
       vec3 mossCol = vec3(0.055, 0.075, 0.046) * (0.78 + 0.44 * n1);
       vec3 soilCol = vec3(0.135, 0.135, 0.118) * (0.84 + 0.32 * grain);
 
