@@ -1013,7 +1013,7 @@ const inkMat = (dark, light, translucency = 0, culm = 0) => {
           // the waxy white bloom just below each node, patchy around the culm
           float band = smoothstep(0.80, 0.88, vUv.y) * (1.0 - smoothstep(0.93, 0.985, vUv.y));
           band *= 0.55 + 0.45 * noise3(vec3(vUv.x * 18.0, vUv.y * 6.0, vAge * 40.0));
-          albedo = mix(albedo, powder, band * (0.55 - 0.3 * vAge));
+          albedo = mix(albedo, powder, band * (0.28 - 0.15 * vAge));
         }
         float sh     = getShadowMask();
         vec3  col    = shadeLit(albedo, N, sh, 1.0);
@@ -1126,8 +1126,13 @@ for (let s = 0; s < stalks.length; s++) {
 
     // fewer branches, denser sprays — scattered twigs read as a dead tree,
     // clumped ones read as a bamboo crown
-    const nb = 1 + Math.floor(rnd() * 1.2 + near * 2);
+    // and more of them toward the top, so the crown gathers into a head
+    const top = seg === st.segs - 1;
+    // the top node also sends up a couple of short twigs, so the culm ends in
+    // a tuft of leaves instead of a bare pole poking out of its crown
+    const nb = 1 + Math.floor(rnd() * 1.2 + near * 2 + (f - 0.45) * 2.4) + (top ? 2 : 0);
     for (let b = 0; b < nb; b++) {
+      const crown = top && b >= nb - 2;
       const bi = branchPlan.length;
       const bLen = st.h * (0.06 + rnd() * 0.09);
       branchPlan.push({
@@ -1136,27 +1141,37 @@ for (let s = 0; s < stalks.length; s++) {
         s, f: Math.min(f + (rnd() - 0.5) * 0.08, 0.97),
         yaw:   rnd() * Math.PI * 2,
         len:   bLen,
-        droop: 0.02 + rnd() * 0.20,             // branches held out, only a slight bow
+        droop: crown ? -(0.6 + rnd() * 0.8)      // crown twigs angle up
+                     : 0.02 + rnd() * 0.20,     // branches held out, only a slight bow
         // thick enough to stay on screen — at 0.09 of the culm a twig was
         // sub-pixel, so the leaves along it seemed to hover unattached
         rad:   Math.max(st.r * 0.16, 0.03),
         ph:    rnd() * Math.PI * 2,
       });
 
-      const nl = 7 + Math.floor(rnd() * 2 + near * 4);
-      for (let l = 0; l < nl; l++) {
-        const len = bLen * (0.42 + rnd() * 0.32) * (1.0 + (1 - near) * 0.5);
-        leafPlan.push({
-          b: bi,
-          // leaves alternate along the twig rather than bunching at its tip
-          along:  Math.min(0.30 + (l / Math.max(1, nl - 1)) * 0.70 + (rnd() - 0.5) * 0.09, 1.0),
-          // fanned to alternating sides OF THE BRANCH, not of the world
-          spread: (l % 2 ? 1 : -1) * (0.18 + rnd() * 0.38),
-          droop:  -0.36 + rnd() * 0.26,         // blades angle up and outward, crisp rather than hanging
-          len,
-          wid:    len * (0.085 + rnd() * 0.04), // a bamboo leaf is ~10× longer than wide
-          ph:     rnd() * Math.PI * 2,
-        });
+      // Bamboo leaves come in fans of three to six at the ends of short twigs
+      // (the painter's 个 and 介), not singly down the branch like a pine.
+      // Two or three fans per branch, out along its outer half.
+      const nFans = 2 + Math.floor(rnd() * (1 + near));
+      for (let k = 0; k < nFans; k++) {
+        const at  = Math.min(0.50 + (k + rnd() * 0.5) / nFans * 0.50, 1.0);
+        const nl  = 3 + Math.floor(rnd() * (1.5 + near * 2.5));
+        const fanSide = rnd() < 0.5 ? -1 : 1;
+        const lean0   = fanSide * (0.20 + rnd() * 0.30);
+        for (let l = 0; l < nl; l++) {
+          const len = bLen * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
+          // blades open like fingers from one point, the middle ones longest
+          const u = nl > 1 ? l / (nl - 1) - 0.5 : 0;
+          leafPlan.push({
+            b: bi,
+            along:  at,
+            spread: lean0 + u * (0.95 + rnd() * 0.25),
+            droop:  -0.30 + rnd() * 0.22 + Math.abs(u) * 0.35,  // outer fingers bow lower
+            len:    len * (1.0 - Math.abs(u) * 0.45),
+            wid:    len * (0.15 + rnd() * 0.04),   // lanceolate, about 6:1
+            ph:     rnd() * Math.PI * 2,
+          });
+        }
       }
     }
   }
@@ -1195,7 +1210,8 @@ for (const st of stalks) {
     const bend1 = st.lean * f1 * f1 * st.h;
     const y0 = st.base + f0 * st.h;
     const tilt = Math.atan2(bend1 - bend0, segH);
-    const rad = st.r * (1 - f0 * 0.34);
+    // tapering harder toward the tip, which is slender and whippy
+    const rad = st.r * (1 - f0 * 0.34 - f0 * f0 * f0 * 0.30);
 
     P.set(st.x + dx * bend0, y0, st.z + dz * bend0);
     E.set(tilt * Math.sin(st.dir), 0, -tilt * Math.cos(st.dir));
