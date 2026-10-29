@@ -1037,6 +1037,8 @@ function addStalk(x, z, h, r) {
   // waterline (which steps up above the falls) and the channel itself
   if (ground < bedAt(z) + 1.1) return;
   if (Math.abs(x - channelX(z)) < 9.5) return;
+  // room around every culm, so a clump reads as separate stems, not a wall
+  for (const o of stalks) if ((o.x - x) ** 2 + (o.z - z) ** 2 < 2.6 * 2.6) return;
   stalks.push({
     x, z,
     base: ground - 0.4,
@@ -1052,14 +1054,14 @@ function addStalk(x, z, h, r) {
 
 /* Groves along both banks, receding into the mist. Nothing is placed close
    enough to crowd the lens — the eye should land on the water first. */
-for (let c = 0; c < 34; c++) {
+for (let c = 0; c < 52; c++) {
   const z    = 6 - Math.pow(rnd(), 0.55) * 150;
   const side = rnd() < 0.5 ? -1 : 1;
   const cx   = channelX(z) + side * (11 + rnd() * 20);
   const n    = 3 + Math.floor(rnd() * 4);
   for (let i = 0; i < n; i++) {
-    const x  = cx + (rnd() - 0.5) * 6;
-    const zz = z + (rnd() - 0.5) * 7;
+    const x  = cx + (rnd() - 0.5) * 13;
+    const zz = z + (rnd() - 0.5) * 15;
     addStalk(x, zz, 10 + rnd() * 11, 0.16 + rnd() * 0.10);
   }
 }
