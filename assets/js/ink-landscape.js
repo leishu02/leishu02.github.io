@@ -211,6 +211,10 @@ const LIP_CX = riverX(FALL_TOP - 0.5);
    curtain's measured width are untouched. Mirrored in the water shader. */
 const bend = z => sstep(-40, -18, z) * Math.sin((z + 40) * 0.105) * 6.5;
 const channelX = z => riverX(z) + bend(z);
+/* A broad, still pool opens just below the plunge before the river narrows
+   and leaves: water that gathers in front of the eye rather than running
+   straight out of frame. Zero up at the lip. Mirrored in the water shader. */
+const pond = z => 7 * Math.exp(-(((z + 37) / 10) ** 2)) * sstep(FALL_BOT, FALL_BOT + 5, z);
 
 function terrainHeight(x, z) {
   // A fall excavates a basin wider than itself, and that basin sits under the
@@ -228,7 +232,7 @@ function terrainHeight(x, z) {
   const basin = ds < 0 ? sstep(-12, 0, ds) : 1 - sstep(0, 90, ds);
   const cx = riverX(z) + (LIP_CX - riverX(z)) * basin + bend(z);
   const d = Math.abs(x - cx);
-  const inner = 8 + 6 * basin;
+  const inner = 8 + 6 * basin + pond(z);
   const valley = sstep(inner, inner + 18, d);       // 0 in the water, 1 in the hills
   // near banks still need real relief, or the stream spreads out into a lake
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
@@ -620,7 +624,8 @@ const water = new THREE.Mesh(
         float cxr = mix(rx, fallCx, bas)
                   + smoothstep(-40.0, -18.0, p.y) * sin((p.y + 40.0) * 0.105) * 6.5;
         float dw  = abs(p.x - cxr);
-        float hw  = 8.0 + 6.0 * bas + 3.5;        // where the wet edge falls
+        float pnd = 7.0 * exp(-pow((p.y + 37.0) / 10.0, 2.0)) * smoothstep(fallBot, fallBot + 5.0, p.y);
+        float hw  = 8.0 + 6.0 * bas + pnd + 3.5;  // where the wet edge falls
         float shallow = smoothstep(hw - 8.0, hw, dw);
         col = mix(col, shallowCol, shallow * 0.62);
 
@@ -1377,6 +1382,38 @@ for (let i = 0; i < 4; i++) {
   mists.push(gl); scene.add(gl);
 }
 
+/* A pale moon (metal) in the open sky above the falls — the ranges on the
+   right rise to the top of the frame, so that is the sky there is.
+   Placed in the frame of the opening view, then left fixed in the world, so
+   it sits behind the ranges and they can cover its lower edge. */
+const moon = (() => {
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grd.addColorStop(0.00, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.36, 'rgba(255,255,255,1)');
+  grd.addColorStop(0.42, 'rgba(255,255,255,0.22)');
+  grd.addColorStop(1.00, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 128, 128);
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, fog: false,
+    color: SKY.clone().multiply(new THREE.Color(1.06, 1.0, 0.86)).multiplyScalar(1.6),
+  }));
+  sp.renderOrder = -0.5;
+  scene.add(sp);
+  return sp;
+})();
+function placeMoon(eye, target) {
+  const f = target.clone().sub(eye).normalize();
+  const right = new THREE.Vector3().crossVectors(f, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, f);
+  const D = 470;
+  moon.position.copy(eye).addScaledVector(f, D)
+    .addScaledVector(right, D * -0.25).addScaledVector(up, D * 0.29);
+  moon.scale.setScalar(D * 0.13);
+}
+
 /* Birds — two strokes of the brush, nothing more */
 function birdTexture() {
   const c = document.createElement('canvas');
@@ -1410,7 +1447,8 @@ for (let i = 0; i < 14; i++) {
   sp.position.set(FALL_CX + side * (5 + rnd() * 22), 40 + rnd() * 14, z);
   const s = 2.6 + rnd() * 2.6;
   sp.scale.set(s, s, 1);
-  sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y };
+  sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y,
+                  op: sp.material.opacity };
   birds.push(sp); scene.add(sp);
 }
 
@@ -1566,6 +1604,7 @@ if (io) io.observe(canvas);
 
 /* ── loop ───────────────────────────────────────────────────── */
 const look = new THREE.Vector3(FALL_CX + panX + turnX, 19, FALL_BOT - 4);
+placeMoon(new THREE.Vector3(FALL_CX + panX + 2.5, 7.5, 34), look);
 const clock = new THREE.Clock();
 
 function frame() {
@@ -1602,10 +1641,20 @@ function frame() {
     if (m.position.x > 118) m.position.x = -118;
     m.position.y = m.userData.y + Math.sin(t * 0.22 + m.userData.ph) * 0.7;
   }
+  // Homeward: the skein flies up the gorge, away from the eye and drawing in
+  // toward the valley axis, rather than crossing the frame and leaving it.
+  // Each bird fades in near the falls and out again deep in the valley.
   for (const b of birds) {
-    b.position.x += b.userData.sp * 0.030;
-    if (b.position.x > 78) b.position.x = -78;
-    b.position.y = b.userData.y + Math.sin(t * 0.55 + b.userData.ph) * 1.3;
+    const u = b.userData;
+    b.position.z -= u.sp * 0.040;
+    b.position.x += (FALL_CX + turnX * 0.5 - b.position.x) * 0.0016;
+    if (b.position.z < -175) {
+      b.position.z = -48 - Math.random() * 6;
+      b.position.x = FALL_CX + (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 22);
+    }
+    const run = (-48 - b.position.z) / 127;
+    b.material.opacity = u.op * Math.min(1, Math.max(0, (run + 0.02) * 6)) * (1 - Math.max(0, run - 0.75) * 4);
+    b.position.y = u.y + Math.sin(t * 0.55 + u.ph) * 1.3;
   }
 
   renderer.render(scene, camera);
