@@ -150,7 +150,7 @@ const MIST_GLSL = /* glsl */`
     const float A = 0.011;     // density at the waterline
     const float B = 0.21;      // thins by e every ~4.8 units of height
     float f = (A / B) * exp(-B * cameraPosition.y) * (1.0 - exp(-t * ry * B)) / ry;
-    vec2  q = wp.xz * 0.035 + vec2(mistTime * 0.020, mistTime * 0.008);
+    vec2  q = wp.xz * 0.035 - vec2(mistTime * 0.020, mistTime * 0.008);   // drifts downwind (+x)
     float bank = noise3(vec3(q, mistTime * 0.015)) * 0.65
                + noise3(vec3(q * 2.3, 1.7 + mistTime * 0.02)) * 0.35;
     // contrast the field so there are clear lanes between banks — an even
@@ -1213,13 +1213,24 @@ const inkMat = (dark, light, translucency = 0, culm = 0, flutter = 0) => {
         // one continuous quadratic bend per culm, sampled at this vertex's
         // height, so every segment, node, twig and leaf agrees where they meet
         float hf = clamp((worldPosition.y - aStalk.x) / aStalk.y, 0.0, 1.3);
-        worldPosition.xyz += aSwayVec * (hf * hf) * sin(uTime * aSwayT.x + aSwayT.y);
-        // each blade trembles on its own, most at the tip, on top of the sway
+        // THE WIND. It blows one way, down the lean of the grove (+x), and it
+        // never drops: a steady push, with gusts that cross the valley as waves.
+        // aSwayT.y is the culm's place along the wind, so a gust reaches the
+        // upwind culms first and runs through the grove; two wave trains of
+        // different length keep it from ever repeating exactly, and a small
+        // shiver of the culm's own (aSwayT.x) keeps neighbours from moving as one.
+        // Mostly positive: bamboo is pushed over and springs back, it does not
+        // swing evenly about upright.
+        float gust = 0.45 + 0.40 * sin(uTime * 0.90 + aSwayT.y)
+                          + 0.22 * sin(uTime * 0.37 + aSwayT.y * 0.6 + 1.3)
+                          + 0.10 * sin(uTime * aSwayT.x * 2.3 + aSwayT.y * 5.0);
+        worldPosition.xyz += aSwayVec * (hf * hf) * gust;
+        // each blade trembles on its own, most at the tip, and harder in a gust
         if (flutter > 0.0) {
           float len = length(instanceMatrix[1].xyz);
           float ph  = dot(instanceMatrix[3].xyz, vec3(1.7, 2.3, 1.1));
-          worldPosition.y += flutter * len * 0.07 * uv.y * uv.y
-                           * (sin(uTime * 2.1 + ph) + 0.5 * sin(uTime * 3.7 + ph * 1.7));
+          worldPosition.y += flutter * len * 0.07 * uv.y * uv.y * (0.45 + max(gust, 0.0))
+                           * (sin(uTime * 2.6 + ph) + 0.5 * sin(uTime * 4.3 + ph * 1.7));
         }
         vec3 transformedNormal = normalMatrix * objN;
         vMistPos = worldPosition.xyz;
@@ -1342,8 +1353,13 @@ function addStalk(x, z, h, r) {
     const off = Math.atan2(x - ex, ez - z) - Math.atan2(turnX - 2.5, ez - (FALL_BOT - 4));
     // the grove leans to the right; those just left of the name stand
     // nearly upright instead, so nothing bows in over the portrait
-    if (z < ez - 10 && off < 0 && off > -0.34) stalks[stalks.length - 1].lean *= 0.2;
+    if (z < ez - 10 && off < 0 && off > -0.34) {
+      const st = stalks[stalks.length - 1];
+      st.lean *= 0.2; st.amp *= 0.35;    // and they give less to the wind
+    }
   }
+  // where this culm stands along the wind: the phase its gusts arrive at
+  stalks[stalks.length - 1].ph = -(x * 0.085 + z * 0.030);
 }
 
 /* Groves along both banks, receding into the mist. Nothing is placed close
@@ -1496,7 +1512,7 @@ for (const st of stalks) {
     E.set(tilt * Math.sin(st.dir), 0, -tilt * Math.cos(st.dir));
     Q.setFromEuler(E);
 
-    const amp = reduceMotion ? 0 : st.amp * st.h;   // displacement at the tip
+    const amp = reduceMotion ? 0 : st.amp * st.h * 1.25;   // displacement at the tip, in a full gust
     S3.set(rad, segH * 1.02, rad);
     push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph, st);
 
@@ -1521,7 +1537,7 @@ for (const br of branchPlan) {
   br._org = ORIGIN.clone();
   br._dir = DIR.clone();
 
-  const amp = reduceMotion ? 0 : st.amp * st.h;     // the culm's, not this node's
+  const amp = reduceMotion ? 0 : st.amp * st.h * 1.25;     // the culm's, not this node's
   br._sway = [Math.cos(st.dir) * amp, 0, Math.sin(st.dir) * amp];
   br._t    = [st.sp, st.ph];
 
