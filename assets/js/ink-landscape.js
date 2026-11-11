@@ -1050,19 +1050,19 @@ const falls = new THREE.Mesh(
         float flow   = clump * 0.50 + strand * 0.34 + fine * 0.16;
 
         // Continuity: the same water passes every level, so as it speeds up the
-        // sheet must thin (thickness x speed is constant). A thin, fast sheet
-        // cannot hold together: it tears into ropes with the rock showing
-        // between them — whole at the lip, broken toward the foot.
+        // sheet must thin (thickness x speed is constant). Here that only makes
+        // the curtain a little more sheer toward the foot: it stays one whole
+        // veil. Torn into ropes with rock showing between, it looked ragged.
         float speed   = sqrt(0.07 + drop);           // 0.07: what it carries over the lip
         float thick   = 0.2646 / speed;              // 1 at the lip
         float breakup = smoothstep(0.04, 0.85, drop);
-        float thr     = mix(-0.30, 0.40, breakup);
+        float thr     = mix(-0.30, 0.02, breakup);
         float cover   = smoothstep(thr, thr + 0.22, flow);
 
         // Aeration: over the lip the water is still glass — smooth, dark,
         // mirroring the sky. Turbulence grows with the fall and whitens it.
         float white = smoothstep(0.015, 0.30, drop);
-        float m = cover * mix(0.86, 0.60 + 0.40 * strand, white);
+        float m = cover * mix(0.86, 0.80 + 0.20 * strand, white) * mix(1.0, 0.88, breakup);
 
         // SILVER: the few threads that catch the light, only in white water
         float silver = smoothstep(0.80, 0.96, fine) * white * cover * 0.8
