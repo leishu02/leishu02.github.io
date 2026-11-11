@@ -1453,6 +1453,20 @@ if (turnX > 0) {
     .sort((a, b) => a[0] - b[0])
     .slice(0, 3)
     .forEach(([, st]) => { st.skip = true; });
+  // 白虎不抬头: on the falls side, no culm may reach the top of the frame.
+  // Seen from where the homepage eye settles, any whose tip comes within a
+  // tenth of the frame's height of the top edge is left out.
+  {
+    const cam = new THREE.PerspectiveCamera(40, 1.95, 0.1, 700);
+    cam.position.set(FALL_CX + panX + 2.5, 7.5 + liftY * 0.35, 34 + backZ);
+    cam.lookAt(FALL_CX + panX + turnX, 19 + liftY, FALL_BOT - 4);
+    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    const tip = new THREE.Vector3();
+    for (const st of stalks) {
+      tip.set(st.x + Math.cos(st.dir) * bendAt(st, 1), st.base + st.h, st.z).project(cam);
+      if (tip.z < 1 && tip.x < -0.25 && tip.y > 0.78) st.skip = true;
+    }
+  }
   // 孤木不成林: on the right of the frame a culm with no companion nearby is
   // left out, so what stands there stands in clumps
   const right = stalks.filter(st => !st.skip && st.x > sightX + 15 && st.z > -40);
