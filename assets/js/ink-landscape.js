@@ -331,18 +331,40 @@ const terrainAO = (() => {
 })();
 tGeo.setAttribute('aAO', new THREE.BufferAttribute(terrainAO, 1));
 
-const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
+/* The terrain's shading is baked once. Rock, moss, strata, the sun, its
+   shadow and the ambient occlusion are all independent of where the eye
+   stands, yet the procedural shader recomputed them — some thirty noise
+   lookups and a 36-tap soft shadow — for every pixel of every frame, and that
+   one material was three quarters of the frame. So it is drawn a single time
+   into a texture laid over the height field (the land is a height field: one
+   texel per patch of ground), and each frame only reads it back, adding the
+   things that do depend on the eye: near-field grain, ink line, mist, fog.
+   RGB holds the lit colour (square-rooted, so 8 bits carry the darks);
+   alpha holds the sun's shadow, which the water reads too. */
+const BAKE_N = lowPower ? 1024 : 2048;
+const bakeRT = new THREE.WebGLRenderTarget(BAKE_N, BAKE_N, {
+  depthBuffer: false, generateMipmaps: true,
+  minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter,
+});
+// the land is nearly always seen at a grazing angle
+bakeRT.texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+const BAKE_UV_GLSL = /* glsl */`
+  vec2 bakeUV(vec3 wp) { return vec2(wp.x / ${TW.toFixed(1)} + 0.5, 0.5 - wp.z / ${TD.toFixed(1)}); }`;
+
+const rockMat = new THREE.ShaderMaterial({
   fog: true, lights: true, defines: DEFINES,
   uniforms: litUniforms({
     fallTop: { value: FALL_TOP },
     fallBot: { value: FALL_BOT },
     fallH:   { value: FALL_H },
+    uBake:   { value: 0 },      // 1 only while the terrain is being baked
   }),
   vertexShader: /* glsl */`
     #include <common>
     #include <shadowmap_pars_vertex>
     #include <fog_pars_vertex>
     attribute float aAO;
+    uniform float uBake;
     varying float vAO;
     varying vec3  vWorld, vWN;
     void main() {
@@ -356,6 +378,8 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       #include <fog_vertex>
       vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
       vWN    = normalize(mat3(modelMatrix) * normal);
+      // baking: lay the mesh out flat in its own UV square
+      if (uBake > 0.5) gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
     }`,
   fragmentShader: /* glsl */`
     #include <common>
@@ -364,7 +388,7 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
     ${LIGHT_GLSL}
     ${NOISE_GLSL}
     ${MIST_GLSL}
-    uniform float fallTop, fallBot, fallH;
+    uniform float fallTop, fallBot, fallH, uBake;
     varying float vAO;
     varying vec3  vWorld, vWN;
 
@@ -375,7 +399,7 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       float range = length(cameraPosition - p);
       // micro-relief fades with distance: past this it only aliases, and the
       // fog is carrying the far ranges anyway
-      float detail = 1.0 - smoothstep(70.0, 230.0, range);
+      float detail = uBake > 0.5 ? 1.0 : 1.0 - smoothstep(70.0, 230.0, range);
 
       // height above the local waterline — the bed steps up above the falls
       float bed   = fallH * (1.0 - smoothstep(fallTop, fallBot, p.z));
@@ -393,11 +417,19 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       // Bedding only shows on near-vertical faces. On a moderate slope the same
       // horizontal planes cut shallowly and spread into contour-map bands.
       ledge = mix(0.6, ledge, smoothstep(0.42, 0.78, steep));
+      // A height-field bake has one texel per patch of ground, so a cliff face
+      // gets only a few texels up its whole height: anything fine on a steep
+      // face would smear into vertical streaks. Bedding, joints and mottling
+      // are therefore left out of the bake and drawn per frame (terrainMat).
+      if (uBake > 0.5) { ledge = 0.6; n1 = mix(n1, 0.5, smoothstep(0.26, 0.60, steep)); }
       // joints stretched along y so they run down the face, not round it
       float joint   = 1.0 - abs(noise3(p * vec3(0.22, 0.035, 0.22)) * 2.0 - 1.0);
       // few, faint joints: the face should read as one sound mass, not fractured
       float crack   = smoothstep(0.975, 0.998, joint) * smoothstep(0.45, 0.75, noise3(p * 0.05));
-      float grain   = detail > 0.0 ? fbm3(p * 1.35) : 0.5;
+      if (uBake > 0.5) crack = 0.0;
+      // finer than a baked texel can hold: left out of the bake and laid over
+      // it per frame, near the eye only
+      float grain   = (uBake < 0.5 && detail > 0.0) ? fbm3(p * 1.35) : 0.5;
       // a low, rounded swell under it all gives the face weight and body
       float mass    = fbm3(p * 0.09);
       float rockH   = ledge * 0.42 + grain * 0.22 + mass * 0.75;
@@ -426,15 +458,102 @@ const terrain = new THREE.Mesh(tGeo, new THREE.ShaderMaterial({
       // stone darkens where the water keeps it wet
       albedo *= mix(0.52, 1.0, smoothstep(0.0, 1.8, above));
 
-      vec3 col = shadeLit(albedo, N, getShadowMask(), vAO);
+      // 浓墨 on the heights: rock darkens toward the peaks, the way a painter
+      // loads the brush for the summit and lets the foot of the mountain go pale
+      albedo *= 1.0 - 0.36 * smoothstep(8.0, 34.0, above) * mix(0.55, 1.0, rockMask);
+
+      float sh  = getShadowMask();
+      vec3  col = shadeLit(albedo, N, sh, vAO);
+      if (uBake > 0.5) {
+        gl_FragColor = vec4(sqrt(clamp(col, 0.0, 1.0)), sh);
+        return;
+      }
       gl_FragColor = vec4(applyMist(col, vWorld), 1.0);
       #include <fog_fragment>
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
-}));
+});
+
+const terrainMat = new THREE.ShaderMaterial({
+  fog: true, defines: { OCTAVES: lowPower ? 2 : 3 },
+  uniforms: Object.assign(THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+    fallTop: { value: FALL_TOP },
+    fallBot: { value: FALL_BOT },
+    fallH:   { value: FALL_H },
+  }]), { tBake: { value: bakeRT.texture }, mistTime: LIGHTING.mistTime, mistCol: LIGHTING.mistCol }),
+  vertexShader: /* glsl */`
+    #include <common>
+    #include <fog_pars_vertex>
+    varying vec2 vUv;
+    varying vec3 vWorld, vWN;
+    void main() {
+      vUv = uv;
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vWorld  = wp.xyz;
+      vWN     = normalize(mat3(modelMatrix) * normal);
+      vec4 mvPosition = viewMatrix * wp;
+      gl_Position = projectionMatrix * mvPosition;
+      #include <fog_vertex>
+    }`,
+  fragmentShader: /* glsl */`
+    #include <common>
+    #include <fog_pars_fragment>
+    ${NOISE_GLSL}
+    ${MIST_GLSL}
+    uniform sampler2D tBake;
+    uniform float fallTop, fallBot, fallH;
+    varying vec2 vUv;
+    varying vec3 vWorld, vWN;
+    void main() {
+      vec4 baked = texture2D(tBake, vUv);
+      vec3 col   = baked.rgb * baked.rgb;
+
+      vec3  toEye = cameraPosition - vWorld;
+      float range = length(toEye);
+      vec3  Ng    = normalize(vWN);
+      float steep = 1.0 - clamp(Ng.y, 0.0, 1.0);
+
+      // the grain the bake cannot hold, near the eye only
+      float near = 1.0 - smoothstep(45.0, 150.0, range);
+      if (near > 0.0) col *= 1.0 + (fbm3(vWorld * 1.35) - 0.5) * 0.42 * near;
+
+      // 皴: bedding on the rock faces — the dark crease under each ledge, and
+      // the stone's mottling. Only steep pixels pay for it.
+      float rockMask = smoothstep(0.26, 0.60, steep);
+      if (rockMask > 0.0 && range < 320.0) {
+        float warp    = fbm3(vWorld * 0.045);
+        float stratum = vWorld.y * 0.17 + warp * 3.9 + fbm3(vWorld * vec3(0.02, 0.0, 0.02)) * 2.3;
+        float bandW   = 0.32 + 0.34 * noise3(vWorld * 0.07);
+        float ledge   = smoothstep(0.0, bandW, abs(fract(stratum) - 0.5) * 2.0);
+        float face    = smoothstep(0.42, 0.78, steep) * (1.0 - smoothstep(170.0, 320.0, range));
+        col *= 1.0 - 0.30 * (1.0 - ledge) * face;
+        col *= mix(1.0, 0.84 + 0.36 * fbm3(vWorld * 0.21), rockMask);
+      }
+
+      // 勾: an ink line where a rock face turns away from the eye, so ridges
+      // and the shoulders of cliffs are drawn, not just shaded
+      float nv  = abs(dot(Ng, toEye / max(range, 1e-4)));
+      float rim = (1.0 - smoothstep(0.02, 0.40, nv)) * smoothstep(0.30, 0.65, steep);
+      col *= 1.0 - 0.55 * rim;
+
+      // 云脚: far ranges lose their feet in mist — dark heights standing on
+      // white, each range lifted clear of the one in front of it
+      float bed   = fallH * (1.0 - smoothstep(fallTop, fallBot, vWorld.z));
+      float above = vWorld.y - (bed + 0.28);
+      // (not the falls' own cliff: white water needs dark rock to read against)
+      float foot  = (1.0 - smoothstep(1.0, 17.0, above)) * smoothstep(118.0, 240.0, range);
+      col = mix(col, mistCol, foot * 0.62);
+
+      gl_FragColor = vec4(applyMist(col, vWorld), 1.0);
+      #include <fog_fragment>
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+});
+
+const terrain = new THREE.Mesh(tGeo, terrainMat);
 terrain.rotation.x = -Math.PI / 2;
-terrain.receiveShadow = true;
 terrain.castShadow = true;
 scene.add(terrain);
 
@@ -481,7 +600,7 @@ if (turnX > 0) {
     }
     g.setAttribute('aAO', new THREE.BufferAttribute(ao, 1));
     g.computeVertexNormals();
-    const m = new THREE.Mesh(g, terrain.material);
+    const m = new THREE.Mesh(g, rockMat);
     const ground = Math.max(bedAt(bz) + 0.28, terrainHeight(bx, bz));
     m.position.set(bx, ground - bh * 0.18, bz);
     m.scale.set(br, bh, br);
@@ -543,10 +662,11 @@ scene.add(sky);
    ══════════════════════════════════════════════════════════════ */
 const water = new THREE.Mesh(
   // dense along its length so the lip of the falls stays a crisp edge
-  new THREE.PlaneGeometry(300, 460, 200, 460),
+  // (only the long swell is geometry, so it needs few columns across)
+  new THREE.PlaneGeometry(300, 460, 48, 460),
   new THREE.ShaderMaterial({
-    fog: true, transparent: true, lights: true,
-    uniforms: litUniforms({
+    fog: true, transparent: true,
+    uniforms: Object.assign(THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
       uTime:   { value: 0 },
       // a gorge pool is dark: nearly all of its brightness is reflected sky
       water:   { value: new THREE.Color(0.018, 0.032, 0.040) },  // deep ink-blue
@@ -557,10 +677,9 @@ const water = new THREE.Mesh(
       fallCx:  { value: 0 },          // set once the channel has been measured
       fallHalfW: { value: 10 },       // likewise
       wallCol: { value: new THREE.Color(0.19, 0.20, 0.19) },  // lit gorge rock, roughly
-    }),
+    }]), LIGHTING, { tBake: { value: bakeRT.texture } }),
     vertexShader: /* glsl */`
       #include <common>
-      #include <shadowmap_pars_vertex>
       #include <fog_pars_vertex>
       uniform float uTime;
       uniform float fallTop, fallBot, fallH;
@@ -580,21 +699,20 @@ const water = new THREE.Mesh(
         pos.z += sin(pos.x * 0.16 + uTime * 0.45) * 0.055
                + sin(pos.y * 0.11 - uTime * 0.33) * 0.045;
 
-        vec4 worldPosition     = modelMatrix * vec4(pos, 1.0);
-        vec3 transformedNormal = normalMatrix * vec3(0.0, 0.0, 1.0);
+        vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
         vWorld = worldPosition.xyz;
         vec4 mvPosition = viewMatrix * worldPosition;
         gl_Position = projectionMatrix * mvPosition;
-        #include <shadowmap_vertex>
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */`
       #include <common>
       #include <fog_pars_fragment>
-      ${SHADOW_PARS_FRAG}
       ${LIGHT_GLSL}
       ${NOISE_GLSL}
       ${MIST_GLSL}
+      ${BAKE_UV_GLSL}
+      uniform sampler2D tBake;
       uniform vec3 water, paper, wallCol;
       uniform float uTime, fallBot, fallCx, fallHalfW, fallH;
       varying vec3  vWorld;
@@ -652,7 +770,10 @@ const water = new THREE.Mesh(
         float F    = 0.02 + 0.98 * pow(1.0 - cosT, 5.0);
 
         // body colour is lit, and takes the cliff's shadow
-        vec3 body = shadeLit(water, vec3(0.0, 1.0, 0.0), getShadowMask(), 1.0);
+        // the sun's shadow, from the terrain bake (its alpha) — the water lies
+        // on the bed, so the ground's shadow is the water's too
+        float sunSh = texture2D(tBake, bakeUV(vWorld)).a;
+        vec3 body = shadeLit(water, vec3(0.0, 1.0, 0.0), sunSh, 1.0);
 
         // What the reflection actually sees. In a gorge a low reflected ray hits
         // the walls, not the sky — reflecting open sky everywhere turned the whole
@@ -680,7 +801,7 @@ const water = new THREE.Mesh(
 
         // a sun glint on facets that tip toward it
         vec3  Hh   = normalize(sunDir + V);
-        col += sunColor * vec3(1.0, 0.90, 0.66) * pow(max(dot(n, Hh), 0.0), 120.0) * 0.45 * getShadowMask();
+        col += sunColor * vec3(1.0, 0.90, 0.66) * pow(max(dot(n, Hh), 0.0), 120.0) * 0.45 * sunSh;
 
         // Foam leaves the plunge and is carried downstream — a wake, not a halo,
         // so it must be one-sided about the basin and drawn out along the flow.
@@ -1748,10 +1869,57 @@ const MOON_EYE = new THREE.Vector3(FALL_CX + panX + 2.5, EYE_Y, 34 + backZ);
 placeMoon(MOON_EYE, look);
 const clock = new THREE.Clock();
 
-function frame() {
+/* Bake the terrain (see rockMat). One ordinary frame first, which draws the
+   sun's shadow map; then the terrain alone, in its procedural material, laid
+   flat into the bake texture. From here on the shadow map is only read by the
+   bamboo and the boulders. */
+function bakeTerrain() {
+  camera.position.set(FALL_CX + panX + 2.5, EYE_Y, 34 + backZ);
+  camera.lookAt(look);
+  renderer.render(scene, camera);
+  const hidden = [];
+  for (const o of scene.children) {
+    if (o !== terrain && !o.isLight && o.visible) { o.visible = false; hidden.push(o); }
+  }
+  terrain.material = rockMat;
+  terrain.receiveShadow = true;
+  terrain.frustumCulled = false;
+  rockMat.uniforms.uBake.value = 1;
+  renderer.setRenderTarget(bakeRT);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(null);
+  rockMat.uniforms.uBake.value = 0;
+  terrain.material = terrainMat;
+  terrain.receiveShadow = false;
+  terrain.frustumCulled = true;
+  for (const o of hidden) o.visible = true;
+}
+bakeTerrain();
+
+let scrollK = 0;
+/* A guard for machines this turns out to be too much for: if frames keep
+   arriving late, give up pixel density a step at a time. Only ever downward,
+   so it settles instead of hunting; stalls (a hidden tab, a GC pause) are
+   ignored. */
+let lastNow = 0, slow = 0, counted = 0;
+function watchPace(now) {
+  const dt = now - lastNow; lastNow = now;
+  if (dt <= 0 || dt > 120) return;
+  counted++; if (dt > 24) slow++;
+  if (counted < 90) return;
+  const ratio = renderer.getPixelRatio();
+  if (slow > 45 && ratio > 0.8) {
+    renderer.setPixelRatio(Math.max(0.75, ratio - 0.25));
+    renderer.setSize(VW, VH, false);
+    setSprayViewport();
+  }
+  counted = slow = 0;
+}
+function frame(now = 0) {
   if (!running) return;
   requestAnimationFrame(frame);
-  if (!onScreen) return;
+  if (!onScreen) { lastNow = 0; return; }
+  watchPace(now);
 
   const t = clock.getElapsedTime();
   ptr.x += (aim.x - ptr.x) * 0.035;
@@ -1763,9 +1931,17 @@ function frame() {
     // stood well back, so the whole fall and the cliff it comes over are in frame
     // Low and looking up: it puts the sky above the gorge in frame, which is
     // the only ground the birds have to read against.
+    // The view opens by settling: the eye starts a little high and far back
+    // and eases down into the composed frame, like a scroll being unrolled.
+    const k = reduceMotion ? 1 : Math.min(t / 4.5, 1);
+    const open = 1 - k * k * (3 - 2 * k);
+    // And as the page scrolls on, the eye rises: near ground slides away
+    // faster than the far ranges, which is all parallax is.
+    scrollK += (Math.min(Math.max(scrollY / Math.max(VH, 1), 0), 1) - scrollK) * 0.12;
     camera.position.x = FALL_CX + panX + 2.5 + ptr.x * 4.0 + Math.sin(t * 0.10) * 1.3;
-    camera.position.y = EYE_Y - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35;
-    camera.position.z = 34 + backZ + Math.cos(t * 0.08) * 1.2;
+    camera.position.y = EYE_Y - ptr.y * 2.2 + Math.sin(t * 0.14) * 0.35
+                      + open * 3.0 + (interactive ? 0 : scrollK * 5.0);
+    camera.position.z = 34 + backZ + Math.cos(t * 0.08) * 1.2 + open * 14.0;
     camera.lookAt(look);
   }
 

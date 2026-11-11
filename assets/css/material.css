@@ -112,7 +112,7 @@ section { padding: 40px 0; }
     position: relative;
     overflow: hidden;
     text-align: center;
-    padding: 72px 24px 56px;
+    padding: 72px 24px 84px;
     /* Plain paper when the scene can't run — reduced motion, no WebGL */
     background: var(--bg);
     border-bottom: 1px solid var(--line);
@@ -145,12 +145,22 @@ section { padding: 40px 0; }
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    /* Tight to the text column, so the falls stays in the clear beside it */
-    background: radial-gradient(38% 56% at 50% 52%,
+    background:
+        /* The painting has no bottom edge: it thins out into the paper it is
+           on, the way a hand scroll does, instead of stopping at a rule. */
+        linear-gradient(to bottom, rgba(241, 239, 233, 0) calc(100% - 66px),
+                                   rgba(241, 239, 233, .5) calc(100% - 30px),
+                                   var(--bg) 100%),
+        /* Tight to the text column, so the falls stays in the clear beside it */
+        radial-gradient(38% 50% at 50% 50%,
                 rgba(241, 239, 233, .68) 0%,
                 rgba(241, 239, 233, .42) 52%,
-                rgba(241, 239, 233, 0) 84%);
+                rgba(241, 239, 233, 0) 84%),
+        /* rice-paper tooth: faint dark flecks over the wash */
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' seed='7'/><feColorMatrix values='0 0 0 0 0.22  0 0 0 0 0.21  0 0 0 0 0.18  0 0 0 0.34 -0.16'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
 }
+/* with the scene running the hero melts into the page: no rule under it */
+.hero.hero-live { border-bottom-color: transparent; }
 .hero img.avatar {
     width: 152px; height: 152px;
     border-radius: 50%;
@@ -274,7 +284,7 @@ footer {
     .nav { justify-content: flex-end; gap: 2px; }
     .nav a { padding: 6px 9px; font-size: 13px; }
     main { padding: 0 16px; }
-    .hero { padding: 40px 16px 32px; }
+    .hero { padding: 40px 16px 60px; }
     .hero h1 { font-size: 32px; }
     .card { padding: 20px; }
 }
