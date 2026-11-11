@@ -1323,15 +1323,27 @@ function addStalk(x, z, h, r) {
     base: ground - 0.4,
     h, r,
     segs: 6 + Math.floor(rnd() * 5),
-    lean: (rnd() < 0.5 ? -1 : 1) * (0.05 + rnd() * 0.11),
+    // One wind for the whole grove: every culm leans the same way by nearly
+    // the same amount. Leaning each its own way read as scribble, not bamboo.
+    // (Same number of rnd() draws as before, so the layout is unchanged.)
+    lean: (0.075 + rnd() * 0.0 + rnd() * 0.035),
     // how far the slender top bows over under the weight of its own leaves:
     // a straight culm reads as a pole, the bow is what says bamboo
-    bow:  0.6 + rnd() * 1.1,
-    dir:  rnd() * Math.PI * 2,
+    bow:  0.85 + rnd() * 0.35,
+    dir:  (rnd() - 0.5) * 0.5,          // downwind is +x, give or take
     ph:   rnd() * Math.PI * 2,
     sp:   0.50 + rnd() * 0.60,
     amp:  0.028 + rnd() * 0.050,
   });
+  // On the homepage no tip may lean in above the portrait: that is the one
+  // thing the clear column behind the name is there to prevent.
+  if (turnX > 0) {
+    const ex = FALL_CX + panX + 2.5, ez = 34 + backZ;
+    const off = Math.atan2(x - ex, ez - z) - Math.atan2(turnX - 2.5, ez - (FALL_BOT - 4));
+    // the grove leans to the right; those just left of the name stand
+    // nearly upright instead, so nothing bows in over the portrait
+    if (z < ez - 10 && off < 0 && off > -0.34) stalks[stalks.length - 1].lean *= 0.2;
+  }
 }
 
 /* Groves along both banks, receding into the mist. Nothing is placed close
@@ -1423,7 +1435,7 @@ for (let s = 0; s < stalks.length; s++) {
         const at  = Math.min(0.35 + (k + rnd() * 0.5) / nFans * 0.65, 1.0);
         const nl  = 3 + Math.floor(rnd() * (1.5 + near * 2.5));
         const fanSide = rnd() < 0.5 ? -1 : 1;
-        const lean0   = fanSide * (0.20 + rnd() * 0.30);
+        const lean0   = fanSide * (0.12 + rnd() * 0.14);
         for (let l = 0; l < nl; l++) {
           // leaf size set by the culm, not by the now much shorter twig
           const len = st.h * 0.13 * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
@@ -1433,7 +1445,7 @@ for (let s = 0; s < stalks.length; s++) {
             b: bi,
             along:  at,
             spread: lean0 + u * (0.95 + rnd() * 0.25),
-            droop:  -0.30 + rnd() * 0.22 + Math.abs(u) * 0.35,  // outer fingers bow lower
+            droop:  -0.22 + rnd() * 0.08 + Math.abs(u) * 0.35,  // outer fingers bow lower
             len:    len * (1.0 - Math.abs(u) * 0.45),
             wid:    len * (0.15 + rnd() * 0.04),   // lanceolate, about 6:1
             ph:     rnd() * Math.PI * 2,
