@@ -232,6 +232,7 @@ const channelX = z => riverX(z) + bend(z);
    straight out of frame. Zero up at the lip. Mirrored in the water shader. */
 const pond = z => 7 * Math.exp(-(((z + 37) / 10) ** 2)) * sstep(FALL_BOT, FALL_BOT + 5, z);
 
+let BACK = null;
 function terrainHeight(x, z) {
   // A fall excavates a basin wider than itself, and that basin sits under the
   // lip — not on the meander line, which has already wandered off by the time
@@ -272,7 +273,28 @@ function terrainHeight(x, z) {
     const d = Math.hypot(x - (LIP_CX + panX + 2.5), z - (34 + backZ));
     h *= 0.2 + 0.8 * sstep(16, 48, d);
   }
+  // the backing peak (see BACK below)
+  if (BACK) h += BACK.a * Math.exp(-((x - BACK.x) ** 2 + (z - BACK.z) ** 2) / (BACK.s * BACK.s));
   return bedAt(z) + h;
+}
+
+/* 靠山. On the homepage the portrait sits at the centre of the frame, and the
+   ridge behind it happened to dip there, between two summits. Find where the
+   line of sight meets the skyline and raise a broad, rounded summit at that
+   spot, a little taller than its neighbours, so one whole mountain stands
+   directly behind the name. Nothing else in the valley moves. */
+if (turnX > 0) {
+  const ex = LIP_CX + panX + 2.5, ey = 7.5 + liftY * 0.35, ez = 34 + backZ;
+  let dx = turnX - 2.5, dz = (FALL_BOT - 4) - ez;
+  const dl = Math.hypot(dx, dz); dx /= dl; dz /= dl;
+  let best = -1, at = 0, hAt = 0;
+  for (let d = 50; d <= 240; d += 2) {
+    const h = terrainHeight(ex + dx * d, ez + dz * d);
+    const ang = Math.atan2(h - ey, d);
+    if (ang > best) { best = ang; at = d; hAt = h; }
+  }
+  const want = Math.tan(THREE.MathUtils.degToRad(22.5)) * at + ey;
+  if (want > hAt) BACK = { x: ex + dx * at, z: ez + dz * at, a: want - hAt, s: Math.max(16, at * 0.17) };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -815,7 +837,7 @@ const water = new THREE.Mesh(
         // pool, not a sheet of light
         // paper is the HDR sky (several times white), so even a fraction of
         // it mirrored at grazing angles was blowing the pool out to white
-        vec3  refl = mix(wallCol, paper * 0.15, env);
+        vec3  refl = mix(wallCol * 0.78, paper * 0.10, env);
         if (R.z < -0.01) {
           float tHit = (-52.0 - vWorld.z) / R.z;          // the curtain's mid-depth
           vec3  hit  = vWorld + R * tHit;
@@ -871,7 +893,7 @@ const water = new THREE.Mesh(
         // stopping on a straight line under the falls
         // the valley mist is sampled a little above the surface: lying on the
         // water at full strength it bleached the whole pool white
-        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.34),
+        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.24),
                             0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
         #include <tonemapping_fragment>
