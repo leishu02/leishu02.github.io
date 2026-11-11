@@ -837,7 +837,7 @@ const water = new THREE.Mesh(
         // pool, not a sheet of light
         // paper is the HDR sky (several times white), so even a fraction of
         // it mirrored at grazing angles was blowing the pool out to white
-        vec3  refl = mix(wallCol * 0.78, paper * 0.10, env);
+        vec3  refl = mix(wallCol * 0.58, paper * 0.07, env);
         if (R.z < -0.01) {
           float tHit = (-52.0 - vWorld.z) / R.z;          // the curtain's mid-depth
           vec3  hit  = vWorld + R * tHit;
@@ -846,9 +846,9 @@ const water = new THREE.Mesh(
                         * step(0.0, hit.y) * (1.0 - smoothstep(fallH * 0.92, fallH, hit.y));
           refl = mix(refl, paper * 0.20, onFalls);
         }
-        vec3 col  = mix(body, refl, F * 0.80);
-        vec3 foamCol    = paper * 0.52;            // white water, a shade under the sky
-        vec3 shallowCol = mix(body, vec3(0.16, 0.16, 0.14), 0.55);  // thin water over the bed
+        vec3 col  = mix(body, refl, F * 0.70);
+        vec3 foamCol    = paper * 0.34;            // white water, a shade under the sky
+        vec3 shallowCol = mix(body, vec3(0.11, 0.115, 0.11), 0.55);  // thin water over the bed
 
         // a sun glint on facets that tip toward it
         vec3  Hh   = normalize(sunDir + V);
@@ -882,7 +882,7 @@ const water = new THREE.Mesh(
         float pnd = 7.0 * exp(-pow((p.y + 37.0) / 10.0, 2.0)) * smoothstep(fallBot, fallBot + 5.0, p.y);
         float hw  = 8.0 + 6.0 * bas + pnd + 3.5;  // where the wet edge falls
         float shallow = smoothstep(hw - 8.0, hw, dw);
-        col = mix(col, shallowCol, shallow * 0.45);
+        col = mix(col, shallowCol, shallow * 0.36);
 
         // and a thread of light where the current parts around the margin
         col = mix(col, foamCol,
@@ -893,7 +893,7 @@ const water = new THREE.Mesh(
         // stopping on a straight line under the falls
         // the valley mist is sampled a little above the surface: lying on the
         // water at full strength it bleached the whole pool white
-        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.24),
+        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.15),
                             0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
         #include <tonemapping_fragment>
