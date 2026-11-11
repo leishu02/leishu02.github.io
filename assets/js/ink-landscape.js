@@ -1229,7 +1229,7 @@ const inkMat = (dark, light, translucency = 0, culm = 0, flutter = 0) => {
         if (flutter > 0.0) {
           float len = length(instanceMatrix[1].xyz);
           float ph  = dot(instanceMatrix[3].xyz, vec3(1.7, 2.3, 1.1));
-          worldPosition.y += flutter * len * 0.07 * uv.y * uv.y * (0.45 + max(gust, 0.0))
+          worldPosition.y += flutter * len * 0.05 * uv.y * uv.y * (0.45 + max(gust, 0.0))
                            * (sin(uTime * 2.6 + ph) + 0.5 * sin(uTime * 4.3 + ph * 1.7));
         }
         vec3 transformedNormal = normalMatrix * objN;
@@ -1525,7 +1525,7 @@ for (const st of stalks) {
     E.set(tilt * Math.sin(st.dir), 0, -tilt * Math.cos(st.dir));
     Q.setFromEuler(E);
 
-    const amp = reduceMotion ? 0 : st.amp * st.h * 1.25;   // displacement at the tip, in a full gust
+    const amp = reduceMotion ? 0 : st.amp * st.h * 0.85;   // displacement at the tip, in a full gust
     S3.set(rad, segH * 1.02, rad);
     push(segD, M.compose(P, Q, S3), dx * amp, 0, dz * amp, st.sp, st.ph, st);
 
@@ -1550,7 +1550,7 @@ for (const br of branchPlan) {
   br._org = ORIGIN.clone();
   br._dir = DIR.clone();
 
-  const amp = reduceMotion ? 0 : st.amp * st.h * 1.25;     // the culm's, not this node's
+  const amp = reduceMotion ? 0 : st.amp * st.h * 0.85;     // the culm's, not this node's
   br._sway = [Math.cos(st.dir) * amp, 0, Math.sin(st.dir) * amp];
   br._t    = [st.sp, st.ph];
 
