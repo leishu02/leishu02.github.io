@@ -523,11 +523,17 @@ const terrainMat = new THREE.ShaderMaterial({
       float rockMask = smoothstep(0.26, 0.60, steep);
       if (rockMask > 0.0 && range < 320.0) {
         float warp    = fbm3(vWorld * 0.045);
-        float stratum = vWorld.y * 0.17 + warp * 3.9 + fbm3(vWorld * vec3(0.02, 0.0, 0.02)) * 2.3;
+        float stratum = vWorld.y * 0.17 + warp * 4.6 + fbm3(vWorld * vec3(0.02, 0.0, 0.02)) * 2.3
+                      + noise3(vWorld * 0.13) * 0.9;
         float bandW   = 0.32 + 0.34 * noise3(vWorld * 0.07);
         float ledge   = smoothstep(0.0, bandW, abs(fract(stratum) - 0.5) * 2.0);
         float face    = smoothstep(0.42, 0.78, steep) * (1.0 - smoothstep(170.0, 320.0, range));
-        col *= 1.0 - 0.30 * (1.0 - ledge) * face;
+        // Broken strokes, not rules: each crease fades in and out along its
+        // length and no two carry the same weight, or the face reads as a
+        // contour map.
+        float brk = smoothstep(0.34, 0.66, noise3(vWorld * vec3(0.11, 0.30, 0.11) + floor(stratum) * 7.3));
+        float wgt = 0.55 + 0.9 * fract(sin(floor(stratum) * 12.9898) * 43758.5453);
+        col *= 1.0 - 0.30 * (1.0 - ledge) * face * brk * wgt;
         col *= mix(1.0, 0.84 + 0.36 * fbm3(vWorld * 0.21), rockMask);
       }
 
