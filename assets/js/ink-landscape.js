@@ -588,7 +588,7 @@ function boulderSphere() {
 
 if (turnX > 0) {
   // (x, z, radius, height, yaw)
-  for (const [bx, bz, br, bh, yaw] of [[1.5, -5, 4.0, 3.6, 0.6], [-6.5, -11, 3.0, 2.6, 2.1], [5.5, -1, 2.1, 1.5, 4.0]]) {
+  for (const [bx, bz, br, bh, yaw] of [[7.6, -16, 4.0, 3.6, 0.6], [-2.3, -22, 3.0, 2.6, 2.1], [11.0, -12, 2.1, 1.5, 4.0]]) {
     const g = boulderSphere();
     const p = g.attributes.position, ao = new Float32Array(p.count);
     for (let i = 0; i < p.count; i++) {
