@@ -258,8 +258,17 @@ function terrainHeight(x, z) {
   const far    = 0.85 + 1.45 * sstep(10, -190, z); // ranges grow with distance
   // the distant ranges round off into ink-wash shoulders; the gorge keeps its edges
   const distant = sstep(-60, -170, z);
-  let h = ridged(x * 0.0115, z * 0.0115, 5, 0.09 * distant);
-  h = Math.pow(h, 1.45 - 0.35 * distant) * 30 * valley * far;
+  // …and so do the ranges on the homepage's right (the east): rounded summits
+  // under the moon, not points
+  let east = 0;
+  if (SIGHT) {
+    const lat = (x - SIGHT.ex) * -SIGHT.dz + (z - SIGHT.ez) * SIGHT.dx;
+    const fwd = (x - SIGHT.ex) *  SIGHT.dx + (z - SIGHT.ez) * SIGHT.dz;
+    east = sstep(16, 55, lat) * sstep(55, 95, fwd);
+  }
+  const round = Math.max(distant, east);
+  let h = ridged(x * 0.0115, z * 0.0115, east > 0.5 ? 3 : 5, 0.09 * distant + 0.07 * east);
+  h = Math.pow(h, 1.45 - 0.35 * round) * 30 * valley * far;
   h += ridged(x * 0.055, z * 0.055, 3) * 1.1 * valley; // bank roughness
   // A deterministic shoulder as well as the noise. Relying on noise alone
   // leaves dips that fall under the waterline far from the channel, so the
@@ -275,11 +284,7 @@ function terrainHeight(x, z) {
   }
   // 青龙宜高: seen from the homepage, the ranges to the right of the line of
   // sight stand a little taller than those on the falls side
-  if (SIGHT) {
-    const lat = (x - SIGHT.ex) * -SIGHT.dz + (z - SIGHT.ez) * SIGHT.dx;
-    const fwd = (x - SIGHT.ex) *  SIGHT.dx + (z - SIGHT.ez) * SIGHT.dz;
-    h *= 1 + 0.34 * sstep(16, 55, lat) * sstep(55, 95, fwd);
-  }
+  h *= 1 + 0.80 * east;   // (rounding takes height off; this puts it back and more)
   // the backing peak (see BACK below): raised past its height and then eased
   // off under a ceiling, so it comes out as a broad rounded dome — a metal or
   // earth mountain — rather than a pointed fire one
@@ -1472,6 +1477,21 @@ if (turnX > 0) {
   const right = stalks.filter(st => !st.skip && st.x > sightX + 15 && st.z > -40);
   for (const st of right) {
     if (!right.some(o => o !== st && Math.hypot(o.x - st.x, o.z - st.z) < 8)) st.skip = true;
+  }
+  // and the same on the left half of the frame, judged as the eye sees it:
+  // a culm with no other within a tenth of the frame's width stands alone
+  {
+    const cam = new THREE.PerspectiveCamera(40, 1.95, 0.1, 700);
+    cam.position.set(FALL_CX + panX + 2.5, 7.5 + liftY * 0.35, 34 + backZ);
+    cam.lookAt(FALL_CX + panX + turnX, 19 + liftY, FALL_BOT - 4);
+    cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+    const seen = stalks.filter(st => !st.skip).map(st => {
+      const v = new THREE.Vector3(st.x, st.base + st.h * 0.7, st.z).project(cam);
+      return { st, x: v.x, y: v.y, ok: v.z < 1 && Math.abs(v.x) < 1.05 };
+    }).filter(o => o.ok);
+    for (const a of seen) {
+      if (a.x < 0 && !seen.some(b => b !== a && Math.abs(b.x - a.x) < 0.10 && Math.abs(b.y - a.y) < 0.45)) a.st.skip = true;
+    }
   }
 }
 
