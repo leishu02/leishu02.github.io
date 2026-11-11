@@ -992,6 +992,7 @@ const falls = new THREE.Mesh(
       uLip:       { value: U_LIP },
       uPhase:     { value: 0 },
       uDim:       { value: 1 },
+      sunDir:     LIGHTING.sunDir,
       mistTime:   LIGHTING.mistTime,   // shared, so one clock drives every surface
       mistCol:    LIGHTING.mistCol,
       fogColor:   { value: scene.fog.color },
@@ -1000,10 +1001,12 @@ const falls = new THREE.Mesh(
     vertexShader: /* glsl */`
       #include <common>
       #include <fog_pars_vertex>
+      uniform vec3 sunDir;
       varying vec2 vUv;
-      varying vec3 vN, vV, vMistPos;
+      varying vec3 vN, vV, vMistPos, vSunV;
       void main() {
         vUv = uv;
+        vSunV = (viewMatrix * vec4(sunDir, 0.0)).xyz;
         vMistPos = (modelMatrix * vec4(position, 1.0)).xyz;
         vN = normalize(normalMatrix * normal);
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
@@ -1019,14 +1022,7 @@ const falls = new THREE.Mesh(
       uniform float uTime, uPool, uLip, uPhase, uDim;
       uniform vec3  paper;
       varying vec2  vUv;
-      varying vec3  vN, vV, vMistPos;
-
-      // one vertical strand — edges kept tight so dark rock shows between falls
-      float ribbon(float x, float c, float w) {
-        // edges ordered low→high; reversed edges are undefined in GLSL and only
-        // happen to work on desktop drivers
-        return 1.0 - smoothstep(w * 0.62, w, abs(x - c));
-      }
+      varying vec3  vN, vV, vMistPos, vSunV;
 
       void main() {
         float x = vUv.x + uPhase * 0.013;
@@ -1036,62 +1032,40 @@ const falls = new THREE.Mesh(
         // joins the upper river and the basin instead of ending at a seam
         float y = (vUv.y - uPool) / (uLip - uPool);
 
-        float xc = x;
+        // THE FALL, from its physics rather than from painted ribbons.
+        //
+        // Free fall: water leaves the lip slowly and accelerates, so distance
+        // goes as time squared and a parcel's fall time is sqrt(drop). Every
+        // pattern below lives in (across, fall-time) coordinates and rides
+        // down at a constant rate in fall time — so on screen it speeds up
+        // and stretches into streaks as it descends, as falling water does.
+        float drop = clamp(1.0 - y, 0.0, 1.3);     // 0 at the lip, 1 at the pool
+        float age  = sqrt(drop);
+        // the lower sheet leans a little with the valley's wind
+        float xs = x + 0.012 * drop * sin(age * 4.0 - t * 0.9);
+        float ph = uPhase * 3.7;
+        float clump  = noise3(vec3(xs *  13.0, age *  2.4 - t * 0.85, ph));        // curtains
+        float strand = noise3(vec3(xs *  64.0, age *  6.5 - t * 2.30, ph + 3.1));  // ropes of water
+        float fine   = noise3(vec3(xs * 170.0, age * 13.0 - t * 3.60, ph + 7.7));  // threads
+        float flow   = clump * 0.50 + strand * 0.34 + fine * 0.16;
 
-        // The strands must span the whole sheet. Clustering them near the
-        // middle left the painted water far narrower than the channel feeding
-        // it — the geometry was the right width all along, but only the middle
-        // of it was ever water.
-        float m = 0.0;
-        m = max(m, ribbon(xc, 0.500, 0.300));
-        m = max(m, ribbon(xc, 0.215, 0.150));
-        m = max(m, ribbon(xc, 0.790, 0.140));
-        m = max(m, ribbon(xc, 0.070, 0.075));
-        m = max(m, ribbon(xc, 0.930, 0.070));
+        // Continuity: the same water passes every level, so as it speeds up the
+        // sheet must thin (thickness x speed is constant). A thin, fast sheet
+        // cannot hold together: it tears into ropes with the rock showing
+        // between them — whole at the lip, broken toward the foot.
+        float speed   = sqrt(0.07 + drop);           // 0.07: what it carries over the lip
+        float thick   = 0.2646 / speed;              // 1 at the lip
+        float breakup = smoothstep(0.04, 0.85, drop);
+        float thr     = mix(-0.30, 0.40, breakup);
+        float cover   = smoothstep(thr, thr + 0.22, flow);
 
-        // Fine threads varying ONLY across the sheet, so the strands stay dead
-        // vertical — any y term here bands the silk. Motion is sideways drift.
-        float d1 = x + sin(t * 0.23) * 0.004;
-        float d2 = x + sin(t * 0.17 + 2.1) * 0.006;
-        m *= 0.66
-           + 0.15 * (sin(d1 * 211.0) * 0.5 + 0.5)
-           + 0.11 * (sin(d2 * 97.0 + 1.7) * 0.5 + 0.5)
-           + 0.08 * (sin(d1 * 47.0 + 0.6) * 0.5 + 0.5);
+        // Aeration: over the lip the water is still glass — smooth, dark,
+        // mirroring the sky. Turbulence grows with the fall and whitens it.
+        float white = smoothstep(0.015, 0.30, drop);
+        float m = cover * mix(0.86, 0.60 + 0.40 * strand, white);
 
-        // FREE FALL. Water leaves the lip at rest and accelerates, so distance
-        // goes as time squared — meaning a packet's "age" is sqrt(drop). Riding
-        // features at a constant rate in that age makes them speed up as they
-        // descend, which is what selling a fall depends on.
-        float age = sqrt(clamp(1.0 - y, 0.0, 1.6));
-
-        // Each filament is offset in age, so packets never line up across the
-        // sheet — coherent packets would be exactly the horizontal banding we
-        // spent this whole scene removing.
-        // The stagger must vary as fast as the filaments themselves; a slow
-        // sweep across x just tilts the packet fronts and weaves a chevron.
-        // Spanning several full turns is the point: offsets smaller than 2π
-        // leave neighbouring filaments correlated, and their packet fronts
-        // weave into a herringbone instead of falling as separate threads.
-        float stagger = (sin(x * 311.0) * 1.70
-                       + sin(x * 137.0 + 1.1) * 1.15
-                       + sin(x *  57.0 + 2.3) * 0.60) * 4.3 + uPhase * 2.0;
-
-        float ph1 = (age * 7.0 - t * 3.10) * 6.2831 + stagger;
-        float ph2 = (age * 12.5 - t * 4.35) * 6.2831 + stagger * 1.7;
-        float packets = pow(0.5 + 0.5 * sin(ph1), 3.0) * 0.65
-                      + pow(0.5 + 0.5 * sin(ph2), 5.0) * 0.35;
-
-        // they brighten as they gather speed toward the basin
-        m *= 0.80 + packets * (0.30 + 0.42 * (1.0 - clamp(y, 0.0, 1.0)));
-
-        // SILVER. A sparse few filaments catch the light and flare — picked at a
-        // frequency finer than the threads themselves, and slowly breathing, so
-        // it glitters rather than striping. Confined to where there is water.
-        float pick   = pow(0.5 + 0.5 * sin(x * 437.0 + 1.7), 14.0);
-        float breath = 0.40 + 0.60 * (0.5 + 0.5 * sin(t * 1.9 + x * 63.0));
-        float glint  = pow(0.5 + 0.5 * sin(ph1 * 0.5 + stagger * 0.6), 16.0);
-        float silver = clamp(pick * breath * 0.9 + glint * 0.45, 0.0, 1.0)
-                     * smoothstep(0.02, 0.16, m)
+        // SILVER: the few threads that catch the light, only in white water
+        float silver = smoothstep(0.80, 0.96, fine) * white * cover * 0.8
                      * (1.0 - smoothstep(0.92, 1.12, y));      // not on the flat upstream run
 
         // Upstream the sheet dissolves into the river's own surface, so the two
@@ -1106,7 +1080,9 @@ const falls = new THREE.Mesh(
 
         // The loop turns tangent to the eye at the curtain's edges, piling many
         // fragments into one pixel; feather them wide or they stack into a flap.
-        m *= smoothstep(0.005, 0.055, x) * (1.0 - smoothstep(0.945, 0.995, x));
+        // And ragged, not ruled: the margin of a fall wanders as it drops.
+        float xe = x + (noise3(vec3(age * 3.0 - t * 1.1, x * 5.0, ph + 11.0)) - 0.5) * 0.09 * drop;
+        m *= smoothstep(0.005, 0.070, xe) * (1.0 - smoothstep(0.930, 0.995, xe));
 
         // Where it lands: a soft band of foam gathered at the waterline itself,
         // widest where the sheet is heaviest. The pool carries the rest.
@@ -1134,7 +1110,14 @@ const falls = new THREE.Mesh(
         // texture; only the spray is pushed into full white. When the whole
         // sheet sat above ACES's shoulder, everything below the lip clipped
         // to one flat white block.
-        vec3 col = mix(paper * 0.22, paper * 0.72, clamp(m * 1.12 + silver, 0.0, 1.0));
+        float body = clamp(strand * 0.55 + clump * 0.45 + 0.25 * (1.0 - thick), 0.0, 1.0);
+        vec3 col = mix(paper * 0.24, paper * 0.80, clamp(body * 1.05 + silver, 0.0, 1.0));
+        // the sheet is a rounded body of water: lit from the sun's side
+        vec3  Nf  = normalize(vN) * (gl_FrontFacing ? 1.0 : -1.0);
+        col *= 0.72 + 0.28 * clamp(dot(Nf, normalize(vSunV)) * 0.5 + 0.5, 0.0, 1.0);
+        // glass over the lip: dark where you look into it, sky where it turns away
+        vec3 glass = mix(paper * 0.13, paper * 0.46, pow(1.0 - facing, 2.0)) * vec3(0.92, 1.0, 0.97);
+        col = mix(glass, col, white);
         col = mix(col, paper * 1.0, clamp(foam, 0.0, 1.0));
         col += paper * vec3(0.05, 0.06, 0.07) * silver;   // the metallic edge of the flare
         gl_FragColor = vec4(applyMist(col, vMistPos), clamp(a, 0.0, 1.0));
