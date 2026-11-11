@@ -2003,21 +2003,25 @@ bakeTerrain();
 
 let scrollK = 0;
 /* A guard for machines this turns out to be too much for: if frames keep
-   arriving late, give up pixel density a step at a time. Only ever downward,
-   so it settles instead of hunting; stalls (a hidden tab, a GC pause) are
-   ignored. */
-let lastNow = 0, slow = 0, counted = 0;
+   arriving late, give up pixel density a step at a time; if a later stretch
+   runs clean, take a step back. A background tab is throttled to a slow, even
+   beat that looks just like a struggling GPU, so the way back up matters — but
+   only twice, so it settles instead of hunting. Stalls are ignored. */
+const BASE_RATIO = renderer.getPixelRatio();
+let lastNow = 0, slow = 0, counted = 0, stepsUp = 0;
+function setRatio(r) {
+  renderer.setPixelRatio(r);
+  renderer.setSize(VW, VH, false);
+  setSprayViewport();
+}
 function watchPace(now) {
   const dt = now - lastNow; lastNow = now;
   if (dt <= 0 || dt > 120) return;
   counted++; if (dt > 24) slow++;
   if (counted < 90) return;
   const ratio = renderer.getPixelRatio();
-  if (slow > 45 && ratio > 0.8) {
-    renderer.setPixelRatio(Math.max(0.75, ratio - 0.25));
-    renderer.setSize(VW, VH, false);
-    setSprayViewport();
-  }
+  if (slow > 45 && ratio > 0.8) setRatio(Math.max(0.75, ratio - 0.25));
+  else if (slow < 3 && ratio < BASE_RATIO && stepsUp < 2) { stepsUp++; setRatio(Math.min(BASE_RATIO, ratio + 0.25)); }
   counted = slow = 0;
 }
 function frame(now = 0) {
