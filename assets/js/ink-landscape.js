@@ -868,7 +868,7 @@ const water = new THREE.Mesh(
         // stopping on a straight line under the falls
         // the valley mist is sampled a little above the surface: lying on the
         // water at full strength it bleached the whole pool white
-        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.55),
+        gl_FragColor = vec4(mix(col, applyMist(col, vWorld + vec3(0.0, 2.6, 0.0)), 0.34),
                             0.94 * (1.0 - smoothstep(0.002, 0.015, vFall)));
         #include <fog_fragment>
         #include <tonemapping_fragment>
@@ -1353,10 +1353,17 @@ function addStalk(x, z, h, r) {
     const off = Math.atan2(x - ex, ez - z) - Math.atan2(turnX - 2.5, ez - (FALL_BOT - 4));
     // the grove leans to the right; those just left of the name stand
     // nearly upright instead, so nothing bows in over the portrait
-    if (z < ez - 10 && off < 0 && off > -0.34) {
-      const st = stalks[stalks.length - 1];
+    const st = stalks[stalks.length - 1];
+    if (z < ez - 10 && off < 0 && off > -0.42) {
       st.lean *= 0.2; st.amp *= 0.35;    // and they give less to the wind
     }
+    // A wider clear margin beside the portrait, more of it on the upwind
+    // (left) side: nothing taller than the head stands next to it. Skipped
+    // at draw time, so no rnd() draw moves.
+    if (z < ez - 10 && off > -0.30 && off < 0.22) st.skip = true;
+    // 白虎不抬头: the near culms on the falls side are kept low, so the left
+    // of the frame never stands taller than the right.
+    if (z > -40 && x < channelX(z) - 8) st.h *= 0.70;
   }
   // where this culm stands along the wind: the phase its gusts arrive at
   stalks[stalks.length - 1].ph = -(x * 0.085 + z * 0.030);
@@ -1676,7 +1683,7 @@ for (let i = 0; i < 26; i++) {
 for (let i = 0; i < 12; i++) {
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({
     map: mistTex, transparent: true, depthWrite: false,
-    opacity: 0.16 + rnd() * 0.20, color: SKY,
+    opacity: (0.16 + rnd() * 0.20) * 0.55, color: SKY,   // thin: the pool should show dark through it
   }));
   sp.position.set(
     FALL_CX + (rnd() - 0.5) * 18,
