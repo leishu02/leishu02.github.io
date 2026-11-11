@@ -232,7 +232,7 @@ const channelX = z => riverX(z) + bend(z);
    straight out of frame. Zero up at the lip. Mirrored in the water shader. */
 const pond = z => 7 * Math.exp(-(((z + 37) / 10) ** 2)) * sstep(FALL_BOT, FALL_BOT + 5, z);
 
-let BACK = null;
+let BACK = null, SIGHT = null;
 function terrainHeight(x, z) {
   // A fall excavates a basin wider than itself, and that basin sits under the
   // lip — not on the meander line, which has already wandered off by the time
@@ -273,8 +273,25 @@ function terrainHeight(x, z) {
     const d = Math.hypot(x - (LIP_CX + panX + 2.5), z - (34 + backZ));
     h *= 0.2 + 0.8 * sstep(16, 48, d);
   }
-  // the backing peak (see BACK below)
-  if (BACK) h += BACK.a * Math.exp(-((x - BACK.x) ** 2 + (z - BACK.z) ** 2) / (BACK.s * BACK.s));
+  // 青龙宜高: seen from the homepage, the ranges to the right of the line of
+  // sight stand a little taller than those on the falls side
+  if (SIGHT) {
+    const lat = (x - SIGHT.ex) * -SIGHT.dz + (z - SIGHT.ez) * SIGHT.dx;
+    const fwd = (x - SIGHT.ex) *  SIGHT.dx + (z - SIGHT.ez) * SIGHT.dz;
+    h *= 1 + 0.34 * sstep(16, 55, lat) * sstep(55, 95, fwd);
+  }
+  // the backing peak (see BACK below): raised past its height and then eased
+  // off under a ceiling, so it comes out as a broad rounded dome — a metal or
+  // earth mountain — rather than a pointed fire one
+  if (BACK) {
+    const w = Math.exp(-((x - BACK.x) ** 2 + (z - BACK.z) ** 2) / (BACK.s * BACK.s));
+    h += BACK.a * w;
+    const H = bedAt(z) + h, c0 = BACK.cap - 7;
+    if (w > 0.02 && H > c0) {
+      const eased = c0 + 7 * (1 - Math.exp(-(H - c0) / 7));
+      return H + (eased - H) * Math.min(1, w * 3);
+    }
+  }
   return bedAt(z) + h;
 }
 
@@ -287,6 +304,7 @@ if (turnX > 0) {
   const ex = LIP_CX + panX + 2.5, ey = 7.5 + liftY * 0.35, ez = 34 + backZ;
   let dx = turnX - 2.5, dz = (FALL_BOT - 4) - ez;
   const dl = Math.hypot(dx, dz); dx /= dl; dz /= dl;
+  SIGHT = { ex, ez, dx, dz };
   let best = -1, at = 0, hAt = 0;
   for (let d = 50; d <= 240; d += 2) {
     const h = terrainHeight(ex + dx * d, ez + dz * d);
@@ -294,7 +312,8 @@ if (turnX > 0) {
     if (ang > best) { best = ang; at = d; hAt = h; }
   }
   const want = Math.tan(THREE.MathUtils.degToRad(22.5)) * at + ey;
-  if (want > hAt) BACK = { x: ex + dx * at, z: ez + dz * at, a: want - hAt, s: Math.max(16, at * 0.17) };
+  if (want > hAt) BACK = { x: ex + dx * at, z: ez + dz * at, a: (want - hAt) * 1.5 + 4,
+                           s: Math.max(20, at * 0.22), cap: want + 1.5 };
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1371,10 +1390,10 @@ function addStalk(x, z, h, r) {
     // A wider clear margin beside the portrait, more of it on the upwind
     // (left) side: nothing taller than the head stands next to it. Skipped
     // at draw time, so no rnd() draw moves.
-    if (z < ez - 10 && off > -0.30 && off < 0.22) st.skip = true;
+    if (z < ez - 10 && off > -0.40 && off < 0.22) st.skip = true;
     // 白虎不抬头: the near culms on the falls side are kept low, so the left
     // of the frame never stands taller than the right.
-    if (z > -40 && x < channelX(z) - 8) st.h *= 0.70;
+    if (z > -75 && x < channelX(z) - 8) st.h *= 0.70;
   }
   // where this culm stands along the wind: the phase its gusts arrive at
   stalks[stalks.length - 1].ph = -(x * 0.085 + z * 0.030);
@@ -1434,6 +1453,12 @@ if (turnX > 0) {
     .sort((a, b) => a[0] - b[0])
     .slice(0, 3)
     .forEach(([, st]) => { st.skip = true; });
+  // 孤木不成林: on the right of the frame a culm with no companion nearby is
+  // left out, so what stands there stands in clumps
+  const right = stalks.filter(st => !st.skip && st.x > sightX + 15 && st.z > -40);
+  for (const st of right) {
+    if (!right.some(o => o !== st && Math.hypot(o.x - st.x, o.z - st.z) < 8)) st.skip = true;
+  }
 }
 
 const branchPlan = [], leafPlan = [];
