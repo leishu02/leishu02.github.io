@@ -842,9 +842,12 @@ const water = new THREE.Mesh(
           float tHit = (-52.0 - vWorld.z) / R.z;          // the curtain's mid-depth
           vec3  hit  = vWorld + R * tHit;
           float onFalls = step(0.0, tHit)
-                        * (1.0 - smoothstep(fallHalfW * 0.85, fallHalfW * 1.02, abs(hit.x - fallCx)))
+                        * (1.0 - smoothstep(fallHalfW * 0.55, fallHalfW * 1.05, abs(hit.x - fallCx)))
                         * step(0.0, hit.y) * (1.0 - smoothstep(fallH * 0.92, fallH, hit.y));
-          refl = mix(refl, paper * 0.20, onFalls);
+          // The falls mirrored in the pool: kept to a dim, rippled sheen. At
+          // full strength it lay across the water as one pale slab and read
+          // as a sandbank, not as a reflection.
+          refl = mix(refl, paper * 0.085, onFalls * (0.45 + 0.35 * sin(p.x * 1.6 + r * 1.2)));
         }
         vec3 col  = mix(body, refl, F * 0.70);
         vec3 foamCol    = paper * 0.34;            // white water, a shade under the sky
