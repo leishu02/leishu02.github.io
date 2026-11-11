@@ -649,11 +649,31 @@ const sky = new THREE.Mesh(
     fragmentShader: /* glsl */`
       uniform vec3 horizon, sunDir;
       varying vec3 vDir;
+      float h1(float n) { return fract(sin(n * 127.1) * 43758.5453); }
+      float n1(float x) { float i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f); return mix(h1(i), h1(i + 1.0), f); }
+      // peaked ridgeline: folded noise, two octaves
+      float ridge1(float x) {
+        float a = 1.0 - abs(n1(x) * 2.0 - 1.0), b = 1.0 - abs(n1(x * 2.3 + 7.0) * 2.0 - 1.0);
+        return a * a * 0.72 + b * 0.28;
+      }
       void main() {
         vec3 d = normalize(vDir);
         vec3 zenith = horizon * vec3(0.86, 0.91, 0.97);
         vec3 col = mix(horizon, zenith, smoothstep(0.02, 0.65, d.y));
         col *= 1.0 + 0.10 * pow(max(dot(d, sunDir), 0.0), 6.0);
+        // 远山: three ranges beyond the modelled land, each a flat pale wash,
+        // darkest along its ridge and dissolving downward into mist — the
+        // far distance of a hand scroll, for the price of a few noise taps.
+        float az = atan(d.x, -d.z);
+        for (int k = 0; k < 3; k++) {
+          float fk = float(k);
+          float h  = 0.085 + 0.060 * fk
+                   + (0.070 + 0.035 * fk) * ridge1(az * (3.1 + 1.9 * fk) + 11.0 * fk)
+                   + 0.012 * ridge1(az * 23.0 + 5.0 * fk);
+          float under = 1.0 - smoothstep(h - 0.0035, h, d.y);
+          float wash  = smoothstep(h - 0.16 - 0.03 * fk, h, d.y);   // fades toward its foot
+          col = mix(col, col * vec3(0.80, 0.815, 0.83), under * wash * (0.50 + 0.10 * fk));
+        }
         gl_FragColor = vec4(col, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
@@ -1160,7 +1180,7 @@ const inkMats = [];
 /* `light` is the albedo, `dark` what it drifts toward at the tip. Lighting is
    the same sun and sky as the rock, in world space — the old version lit each
    blade from a fixed direction in view space, so the light swung with the eye. */
-const inkMat = (dark, light, translucency = 0, culm = 0) => {
+const inkMat = (dark, light, translucency = 0, culm = 0, flutter = 0) => {
   const m = new THREE.ShaderMaterial({
     fog: true, lights: true, side: THREE.DoubleSide,
     uniforms: litUniforms({
@@ -1168,6 +1188,7 @@ const inkMat = (dark, light, translucency = 0, culm = 0) => {
       dark:  { value: new THREE.Color(dark) },
       light: { value: new THREE.Color(light) },
       translucency: { value: translucency },
+      flutter: { value: reduceMotion ? 0 : flutter },   // leaves only
       culm:  { value: culm },   // 1 on culm segments: age tint and node powder
       aged:  { value: new THREE.Color('#6b6a3e') },
       powder:{ value: new THREE.Color('#9aa39a') },
@@ -1176,7 +1197,7 @@ const inkMat = (dark, light, translucency = 0, culm = 0) => {
       #include <common>
       #include <shadowmap_pars_vertex>
       #include <fog_pars_vertex>
-      uniform float uTime;
+      uniform float uTime, flutter;
       attribute vec3 aSwayVec;   // full displacement at peak sway
       attribute vec2 aSwayT;     // (speed, phase)
       attribute vec3 aStalk;     // (base y, height, age) of the culm this part belongs to
@@ -1193,6 +1214,13 @@ const inkMat = (dark, light, translucency = 0, culm = 0) => {
         // height, so every segment, node, twig and leaf agrees where they meet
         float hf = clamp((worldPosition.y - aStalk.x) / aStalk.y, 0.0, 1.3);
         worldPosition.xyz += aSwayVec * (hf * hf) * sin(uTime * aSwayT.x + aSwayT.y);
+        // each blade trembles on its own, most at the tip, on top of the sway
+        if (flutter > 0.0) {
+          float len = length(instanceMatrix[1].xyz);
+          float ph  = dot(instanceMatrix[3].xyz, vec3(1.7, 2.3, 1.1));
+          worldPosition.y += flutter * len * 0.07 * uv.y * uv.y
+                           * (sin(uTime * 2.1 + ph) + 0.5 * sin(uTime * 3.7 + ph * 1.7));
+        }
         vec3 transformedNormal = normalMatrix * objN;
         vMistPos = worldPosition.xyz;
         vAge = aStalk.z;
@@ -1220,7 +1248,7 @@ const inkMat = (dark, light, translucency = 0, culm = 0) => {
         N = gl_FrontFacing ? N : -N;
         vec3  albedo = mix(light, dark, vUv.y * 0.35 * (1.0 - culm));   // tips darken
         // older culms fade from green toward straw; every part of the plant shares it
-        albedo = mix(albedo, aged, vAge * 0.55);
+        albedo = mix(albedo, aged, vAge * 0.32);
         if (culm > 0.5) {
           albedo *= 0.92 + 0.16 * vHf;   // the sheath-stained foot is darker
           // the waxy white bloom just below each node, patchy around the culm
@@ -1276,6 +1304,8 @@ const behindName = (x, z) => {
   return z < ez - 10 && Math.abs(a - aim) < 0.17;
 };
 
+const bendAt = (st, f) => st.lean * st.h * (f * f + st.bow * f * f * f * f);
+
 function addStalk(x, z, h, r) {
   if (blocksView(x, z) || behindName(x, z) || thinWestRidge(x, z)) return;
   const ground = terrainHeight(x, z);
@@ -1293,7 +1323,10 @@ function addStalk(x, z, h, r) {
     base: ground - 0.4,
     h, r,
     segs: 6 + Math.floor(rnd() * 5),
-    lean: (rnd() - 0.5) * 0.22,
+    lean: (rnd() < 0.5 ? -1 : 1) * (0.05 + rnd() * 0.11),
+    // how far the slender top bows over under the weight of its own leaves:
+    // a straight culm reads as a pole, the bow is what says bamboo
+    bow:  0.6 + rnd() * 1.1,
     dir:  rnd() * Math.PI * 2,
     ph:   rnd() * Math.PI * 2,
     sp:   0.50 + rnd() * 0.60,
@@ -1362,7 +1395,7 @@ for (let s = 0; s < stalks.length; s++) {
     const top = seg === st.segs - 1;
     // the top node also sends up a couple of short twigs, so the culm ends in
     // a tuft of leaves instead of a bare pole poking out of its crown
-    const nb = 1 + Math.floor(rnd() * 1.2 + near * 2 + (f - 0.45) * 2.4) + (top ? 2 : 0);
+    const nb = 1 + Math.floor(rnd() * 1.2 + near * 2 + (f - 0.45) * 4.2) + (top ? 2 : 0);
     for (let b = 0; b < nb; b++) {
       const crown = top && b >= nb - 2;
       const bi = branchPlan.length;
@@ -1385,7 +1418,7 @@ for (let s = 0; s < stalks.length; s++) {
       // Bamboo leaves come in fans of three to six at the ends of short twigs
       // (the painter's 个 and 介), not singly down the branch like a pine.
       // Two or three fans per branch, out along its outer half.
-      const nFans = 2 + Math.floor(rnd() * (1 + near));
+      const nFans = 2 + Math.floor(rnd() * (1.6 + near));
       for (let k = 0; k < nFans; k++) {
         const at  = Math.min(0.35 + (k + rnd() * 0.5) / nFans * 0.65, 1.0);
         const nl  = 3 + Math.floor(rnd() * (1.5 + near * 2.5));
@@ -1393,7 +1426,7 @@ for (let s = 0; s < stalks.length; s++) {
         const lean0   = fanSide * (0.20 + rnd() * 0.30);
         for (let l = 0; l < nl; l++) {
           // leaf size set by the culm, not by the now much shorter twig
-          const len = st.h * 0.10 * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
+          const len = st.h * 0.13 * (0.48 + rnd() * 0.30) * (1.0 + (1 - near) * 0.5);
           // blades open like fingers from one point, the middle ones longest
           const u = nl > 1 ? l / (nl - 1) - 0.5 : 0;
           leafPlan.push({
@@ -1440,8 +1473,8 @@ for (const st of stalks) {
   for (let s = 0; s < st.segs; s++) {
     const f0 = s / st.segs, f1 = (s + 1) / st.segs;
     // the culm curves: displacement grows with the square of the height
-    const bend0 = st.lean * f0 * f0 * st.h;
-    const bend1 = st.lean * f1 * f1 * st.h;
+    const bend0 = bendAt(st, f0);
+    const bend1 = bendAt(st, f1);
     const y0 = st.base + f0 * st.h;
     const tilt = Math.atan2(bend1 - bend0, segH);
     // tapering harder toward the tip, which is slender and whippy
@@ -1465,7 +1498,7 @@ for (const st of stalks) {
 /* side branches, each remembering its tip so a spray can hang off it */
 for (const br of branchPlan) {
   const st = stalks[br.s];
-  const bend = st.lean * br.f * br.f * st.h;
+  const bend = bendAt(st, br.f);
 
   ORIGIN.set(
     st.x + Math.cos(st.dir) * bend,
@@ -1538,10 +1571,11 @@ function buildMesh(geo, mat, data) {
   return mesh;
 }
 
-buildMesh(stalkGeo,  inkMat('#1a2620', '#3f5238', 0, 1), segD);
+buildMesh(stalkGeo,  inkMat('#141d18', '#30422e', 0, 1), segD);
 buildMesh(ringGeo,   inkMat('#161f14', '#2b3824'), ringD);
 buildMesh(branchGeo, inkMat('#18231a', '#33452f'), branchD);
-buildMesh(leafGeo,   inkMat('#223020', '#46583a', 0.45), leafD);
+// 墨竹: the leaves are the darkest ink in the picture
+buildMesh(leafGeo,   inkMat('#0e1510', '#27362a', 0.40, 0, 1), leafD);
 console.log(`bamboo:  culms · ${branchD.length} branches · ${leafD.length} leaves`);
 
 /* Contact occlusion for the grove: the ground's ambient darkens around each
@@ -1675,43 +1709,80 @@ function placeMoon(eye, target) {
   moon.scale.setScalar(D * 0.26 * moonS);
 }
 
-/* Birds — two strokes of the brush, nothing more */
-function birdTexture() {
-  const c = document.createElement('canvas');
-  c.width = c.height = 64;
-  const g = c.getContext('2d');
-  g.strokeStyle = 'rgba(30,48,60,0.85)';
-  g.lineWidth = 3; g.lineCap = 'round';
-  g.beginPath();
-  g.moveTo(6, 34); g.quadraticCurveTo(20, 20, 32, 30);
-  g.quadraticCurveTo(44, 20, 58, 34);
-  g.stroke();
-  return new THREE.CanvasTexture(c);
-}
-const birdTex = birdTexture();
-const birds = [];
-/* A skein crossing the notch of sky above the falls. Exempt from fog: at this
-   range it erased them, and a bird in an ink painting stays a clean dark mark
-   however far off it is — that is the whole convention. */
-for (let i = 0; i < 14; i++) {
-  const sp = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: birdTex, transparent: true, depthWrite: false, fog: false,
-    opacity: 0.45 + rnd() * 0.35,
+/* Birds — a skein of wild geese (雁阵) going home up the gorge, and a few
+   stragglers. Each is one brush stroke: a tapered ribbon bent at the shoulders,
+   and the bend is the wingbeat, done in the vertex shader. They flap, then
+   glide a while. One instanced mesh, one draw call. Exempt from fog: a bird in
+   an ink painting stays a clean dark mark however far off it is. */
+const BIRD_N = 13, SKEIN = 9;
+const birdFlock = (() => {
+  const SEG_B = 6, pos = [], span = [], idx = [];
+  for (let k = 0; k <= SEG_B * 2; k++) {
+    const sN = k / SEG_B - 1;                       // -1 wingtip … 0 body … 1 wingtip
+    pos.push(0, 0, 0, 0, 0, 0);
+    span.push(sN, 1, sN, -1);
+    if (k < SEG_B * 2) { const a = k * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const g = new THREE.InstancedBufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('aSpan', new THREE.Float32BufferAttribute(span, 2));
+  g.setIndex(idx);
+  g.instanceCount = BIRD_N;
+  const at = new Float32Array(BIRD_N * 4), ph = new Float32Array(BIRD_N * 2);
+  g.setAttribute('aAt', new THREE.InstancedBufferAttribute(at, 4).setUsage(THREE.DynamicDrawUsage));  // xyz, opacity
+  g.setAttribute('aPh', new THREE.InstancedBufferAttribute(ph, 2));                                 // phase, size
+  const mesh = new THREE.Mesh(g, new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide,
+    uniforms: { uTime: { value: 0 } },
+    vertexShader: /* glsl */`
+      uniform float uTime;
+      attribute vec2 aSpan;
+      attribute vec4 aAt;
+      attribute vec2 aPh;
+      varying float vA;
+      void main() {
+        float s = aSpan.x, a = abs(s);
+        // beat a few times, then hold the wings out and glide
+        float beat  = smoothstep(-0.25, 0.35, sin(uTime * 0.31 + aPh.x * 3.0));
+        float theta = mix(0.16, 0.10 + 0.62 * sin(uTime * (5.2 + aPh.x * 0.25) + aPh.x * 6.28), beat);
+        // the outer wing lags the inner: the stroke bends, it does not hinge
+        float lift = a * sin(theta) + a * a * 0.30 * sin(theta - 0.9) - 0.10 * a * a;
+        float th   = 0.016 + 0.085 * pow(1.0 - a, 1.4);          // loaded at the body, dry at the tips
+        vec3 p = vec3(s * cos(theta * 0.7), lift + aSpan.y * th, 0.0) * aPh.y;
+        // always broadside to the eye, like a mark on the paper
+        vec4 mv = viewMatrix * vec4(aAt.xyz, 1.0);
+        mv.xy += p.xy;
+        gl_Position = projectionMatrix * mv;
+        vA = aAt.w * (0.55 + 0.45 * (1.0 - a));
+      }`,
+    fragmentShader: /* glsl */`
+      varying float vA;
+      void main() {
+        gl_FragColor = vec4(vec3(0.085, 0.10, 0.115), vA);
+        #include <colorspace_fragment>
+      }`,
   }));
-  // Biased off to one side and high: dead centre is where a portrait or a
-  // headline sits, and a bird behind either is a bird nobody sees.
-  // Over the notch of sky above the fall: high enough to clear the ridgeline,
-  // low enough to stay inside a frame that is only tilted 7° upward, and near
-  // the valley axis where there is open sky rather than mountain behind them.
-  const z = -50 - rnd() * 45;
-  const side = rnd() < 0.5 ? -1 : 1;
-  sp.position.set(FALL_CX + side * (5 + rnd() * 22), 40 + rnd() * 14, z);
-  const s = 2.6 + rnd() * 2.6;
-  sp.scale.set(s, s, 1);
-  sp.userData = { sp: 1.1 + rnd() * 1.4, ph: rnd() * Math.PI * 2, y: sp.position.y,
-                  op: sp.material.opacity };
-  birds.push(sp); scene.add(sp);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  scene.add(mesh);
+  return { mesh, at, ph };
+})();
+const birds = [];
+for (let i = 0; i < BIRD_N; i++) {
+  const lone = i >= SKEIN;
+  birds.push({
+    // place in the V behind the leader: alternate sides, each a little back and out
+    dx: lone ? (rnd() - 0.5) * 60 : (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 3.3,
+    dz: lone ? rnd() * 90        : Math.ceil(i / 2) * 3.0,
+    dy: lone ? (rnd() - 0.5) * 12 : -Math.ceil(i / 2) * 0.35 + (rnd() - 0.5) * 0.5,
+    sp: lone ? 0.9 + rnd() * 0.6 : 1.25,
+    ph: rnd(), op: lone ? 0.45 + rnd() * 0.25 : 0.78,
+    z: -50 - rnd() * 60,
+  });
+  birdFlock.ph[i * 2] = birds[i].ph;
+  birdFlock.ph[i * 2 + 1] = lone ? 1.3 + rnd() * 0.7 : 1.9 - Math.ceil(i / 2) * 0.05;
 }
+let skeinZ = -62;
 
 /* ══════════════════════════════════════════════════════════════
    SPRAY — mist boiling up out of the plunge
@@ -1967,17 +2038,27 @@ function frame(now = 0) {
   // Homeward: the skein flies up the gorge, away from the eye and drawing in
   // toward the valley axis, rather than crossing the frame and leaving it.
   // Each bird fades in near the falls and out again deep in the valley.
-  for (const b of birds) {
-    const u = b.userData;
-    b.position.z -= u.sp * 0.040;
-    b.position.x += (FALL_CX + turnX * 0.5 - b.position.x) * 0.0016;
-    if (b.position.z < -175) {
-      b.position.z = -48 - Math.random() * 6;
-      b.position.x = FALL_CX + (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 22);
+  {
+    const run01 = z => (-48 - z) / 127;
+    const fade  = r => Math.min(1, Math.max(0, (r + 0.02) * 6)) * (1 - Math.max(0, r - 0.75) * 4);
+    if (!reduceMotion) skeinZ -= 0.050;
+    if (skeinZ < -175) skeinZ = -48;
+    const axisX = FALL_CX + turnX * 0.5;
+    for (let i = 0; i < BIRD_N; i++) {
+      const b = birds[i], lone = i >= SKEIN;
+      let x, y, z;
+      if (lone) {
+        if (!reduceMotion) b.z -= b.sp * 0.040;
+        if (b.z < -175) b.z = -48 - Math.random() * 6;
+        z = b.z; x = axisX + b.dx * (1 - 0.5 * run01(z)); y = 47 + b.dy;
+      } else {
+        z = skeinZ + b.dz; x = axisX - 6 + b.dx; y = 46 + b.dy;
+      }
+      y += Math.sin(t * 0.55 + b.ph * 6.28) * (lone ? 1.3 : 0.5);
+      birdFlock.at.set([x, y, z, b.op * fade(run01(z))], i * 4);
     }
-    const run = (-48 - b.position.z) / 127;
-    b.material.opacity = u.op * Math.min(1, Math.max(0, (run + 0.02) * 6)) * (1 - Math.max(0, run - 0.75) * 4);
-    b.position.y = u.y + Math.sin(t * 0.55 + u.ph) * 1.3;
+    birdFlock.mesh.geometry.attributes.aAt.needsUpdate = true;
+    birdFlock.mesh.material.uniforms.uTime.value = reduceMotion ? 1.3 : t;
   }
 
   renderer.render(scene, camera);
