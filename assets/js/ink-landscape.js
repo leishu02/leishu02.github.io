@@ -468,7 +468,10 @@ const rockMat = new THREE.ShaderMaterial({
         gl_FragColor = vec4(sqrt(clamp(col, 0.0, 1.0)), sh);
         return;
       }
-      gl_FragColor = vec4(applyMist(col, vWorld), 1.0);
+      // (Past the bake this material only draws the boulders. They sit low in
+      // the pool where the valley mist is densest, and at full strength it
+      // bleached them to the colour of the spray; they take less than half.)
+      gl_FragColor = vec4(mix(col, applyMist(col, vWorld), 0.40), 1.0);
       #include <fog_fragment>
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
