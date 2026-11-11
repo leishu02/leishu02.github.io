@@ -1405,6 +1405,19 @@ if (turnX > 0) {
 /* Pre-roll the foliage so it doesn't shimmer between frames.
    Bamboo carries nothing on the lower culm, then throws thin side branches
    that each end in a small drooping spray — that silhouette is the whole plant. */
+/* Homepage: three fewer culms on the falls-side ridge. Wood feeds fire, and
+   the foliage grew heavier when the crowns were filled out, so the count
+   comes down to keep the grove at "enough". They are skipped at draw time
+   rather than removed, so no rnd() draw moves and nothing else shifts. */
+if (turnX > 0) {
+  stalks
+    .filter(st => st.z < -40 && st.x < channelX(st.z) - 10)
+    .map(st => { const v = Math.sin(st.x * 91.7 + st.z * 37.3) * 15731.7; return [v - Math.floor(v), st]; })
+    .sort((a, b) => a[0] - b[0])
+    .slice(0, 3)
+    .forEach(([, st]) => { st.skip = true; });
+}
+
 const branchPlan = [], leafPlan = [];
 for (let s = 0; s < stalks.length; s++) {
   const st = stalks[s];
@@ -1484,7 +1497,7 @@ const segD = [], ringD = [], branchD = [], leafD = [];
    its own foot, so neighbouring segments moved by different amounts and the
    culm came apart at every node in the wind. */
 const push = (arr, mat, sx, sy, sz, speed, phase, st) =>
-  arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase], k: [st.base, st.h, culmAge(st)] });
+  st.skip || arr.push({ m: mat.clone(), s: [sx, sy, sz], t: [speed, phase], k: [st.base, st.h, culmAge(st)] });
 /* 0 for a green first-year shoot, 1 for an old yellowed culm. Hashed from the
    position so it costs no draws from rnd() and the grove's layout is unchanged. */
 function culmAge(st) {
@@ -1706,10 +1719,10 @@ const moon = (() => {
   c.width = c.height = 256;
   const g = c.getContext('2d');
   const halo = g.createRadialGradient(128, 128, 0, 128, 128, 128);
-  halo.addColorStop(0.00, 'rgba(100,104,108,0.85)');
-  halo.addColorStop(0.30, 'rgba(100,104,108,0.62)');
-  halo.addColorStop(0.62, 'rgba(100,104,108,0.22)');
-  halo.addColorStop(1.00, 'rgba(100,104,108,0)');
+  halo.addColorStop(0.00, 'rgba(84,88,94,1.0)');
+  halo.addColorStop(0.30, 'rgba(84,88,94,0.82)');
+  halo.addColorStop(0.62, 'rgba(84,88,94,0.34)');
+  halo.addColorStop(1.00, 'rgba(84,88,94,0)');
   g.fillStyle = halo; g.fillRect(0, 0, 256, 256);
   const disc = g.createRadialGradient(128, 128, 0, 128, 128, 34);
   disc.addColorStop(0.00, 'rgba(255,255,255,1)');
